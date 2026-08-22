@@ -133,12 +133,12 @@ def test_config_requires_exact_endpoint_role_and_hides_password() -> None:
         {
             "PGHOST": "10.10.1.3",
             "PGPORT": "54321",
-            "PGUSER": "market-regime-loader",
+            "PGUSER": "regime-data-loader",
             "PGDATABASE": "quant_data",
             "PGPASSWORD": "repo-secret",
         }
     )
-    assert (config.host, config.port, config.user) == ("10.10.1.3", 54321, "market-regime-loader")
+    assert (config.host, config.port, config.user) == ("10.10.1.3", 54321, "regime-data-loader")
     assert "repo-secret" not in repr(config)
     with pytest.raises(ValueError, match="host"):
         PostgresSyncConfig("localhost", 54321, POSTGRES_USER, "quant_data", "x")
@@ -165,9 +165,9 @@ def test_schema_ddl_is_gold_only_timestamptz_and_idempotent() -> None:
     assert '"timestamp_m1" TIMESTAMPTZ(6) NOT NULL PRIMARY KEY' in ddl
     for column in GOLD_COLUMNS[1:]:
         assert f'"{column}" DOUBLE PRECISION NULL' in ddl
-    assert '"market_regime"."regime_features_daily"' in ddl
-    assert '"market_regime_sync"."gold_sync_state"' in ddl
-    assert '"market_regime_sync"."gold_row_hashes"' in ddl
+    assert '"regime_data"."regime_features_daily"' in ddl
+    assert '"regime_data_sync"."gold_sync_state"' in ddl
+    assert '"regime_data_sync"."gold_row_hashes"' in ddl
     assert "TRUNCATE" not in ddl
     assert "DROP TABLE" not in ddl
     assert "CREATE SCHEMA" not in ddl
@@ -235,19 +235,19 @@ def test_apply_delta_is_locked_exact_and_state_is_last_before_commit() -> None:
     queries = _execute_queries(connection)
     lock_index = next(i for i, query in enumerate(queries) if "pg_advisory_xact_lock" in query)
     insert_index = next(
-        i for i, query in enumerate(queries) if query.startswith('INSERT INTO "market_regime"')
+        i for i, query in enumerate(queries) if query.startswith('INSERT INTO "regime_data"')
     )
     update_index = next(
-        i for i, query in enumerate(queries) if query.startswith('UPDATE "market_regime"')
+        i for i, query in enumerate(queries) if query.startswith('UPDATE "regime_data"')
     )
     delete_index = next(
-        i for i, query in enumerate(queries) if query.startswith('DELETE FROM "market_regime"')
+        i for i, query in enumerate(queries) if query.startswith('DELETE FROM "regime_data"')
     )
     summary_index = next(i for i, query in enumerate(queries) if query.startswith("SELECT COUNT"))
     state_index = next(
         i
         for i, query in enumerate(queries)
-        if 'INSERT INTO "market_regime_sync"."gold_sync_state"' in query
+        if 'INSERT INTO "regime_data_sync"."gold_sync_state"' in query
     )
     assert lock_index < insert_index < update_index < delete_index < summary_index < state_index
     assert queries.count(module._INSERT_ROW_SQL) == 1
@@ -301,9 +301,7 @@ def test_post_write_verification_failure_rolls_back_before_state_write() -> None
     with pytest.raises(PostgresGoldRepositoryError):
         repository.apply_delta(POSTGRES_DATASET_ID, GoldDeltaPlan((), (), (), (), ()), _state())
     queries = _execute_queries(connection)
-    assert not any(
-        'INSERT INTO "market_regime_sync"."gold_sync_state"' in query for query in queries
-    )
+    assert not any('INSERT INTO "regime_data_sync"."gold_sync_state"' in query for query in queries)
     assert ("rollback", None, None) in connection.events
 
 

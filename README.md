@@ -256,9 +256,9 @@ PostgreSQL is a serving/research replica, not the canonical data store. The only
 
 ```text
 canonical source: lake/gold/dataset=regime_features_daily/...
-consumer table:  market_regime.regime_features_daily
-sync state:      market_regime_sync.gold_sync_state
-row digests:     market_regime_sync.gold_row_hashes
+consumer table:  regime_data.regime_features_daily
+sync state:      regime_data_sync.gold_sync_state
+row digests:     regime_data_sync.gold_row_hashes
 ```
 
 `timestamp_m1` is stored as `TIMESTAMPTZ(6)` and the database session is UTC. Feature columns are nullable `DOUBLE PRECISION`. Sync metadata never pollutes the consumer table.
@@ -273,7 +273,7 @@ Install/sync the project and use the console entry point:
 
 ```bash
 uv sync
-uv run market-regime-loader --help
+uv run regime-data-loader --help
 ```
 
 The exact command surface is:
@@ -295,27 +295,27 @@ Examples:
 
 ```bash
 # Normal bounded source update only.
-uv run market-regime-loader \
+uv run regime-data-loader \
   --lake-root /srv/market-regime/lake \
   update --series us_10y
 
 # Explicit operator reconciliation; never invoked by run-daily.
-uv run market-regime-loader \
+uv run regime-data-loader \
   --lake-root /srv/market-regime/lake \
   reconcile --series us_10y
 
 # Full local Gold publication path.
-uv run market-regime-loader \
+uv run regime-data-loader \
   --lake-root /srv/market-regime/lake \
   run-daily
 
 # Synchronize the currently catalog-selected Gold build only.
-uv run market-regime-loader \
+uv run regime-data-loader \
   --lake-root /srv/market-regime/lake \
   gold-sync-postgres
 
 # Rebuild and print the local inventory.
-uv run market-regime-loader \
+uv run regime-data-loader \
   --lake-root /srv/market-regime/lake \
   inventory --json
 ```
@@ -357,7 +357,7 @@ PostgreSQL synchronization requires the dedicated repository role and exact endp
 ```text
 PGHOST=10.10.1.3
 PGPORT=54321
-PGUSER=market-regime-loader
+PGUSER=regime-data-loader
 PGDATABASE=<serving database>
 PGPASSWORD=<repository-specific secret>
 ```
@@ -367,7 +367,7 @@ Do not commit these values as a credential string. Deployment configuration live
 The canonical main log is enforced as:
 
 ```text
-${PROJECT_ROOT}/.logs/market-regime-loader.log
+${PROJECT_ROOT}/.logs/regime-data-loader.log
 ```
 
 The optional Gold mirror still runs only as part of local publication; a PostgreSQL sync failure does not roll back the authoritative Gold catalog.
@@ -377,25 +377,25 @@ The optional Gold mirror still runs only as part of local publication; a Postgre
 The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. The checked-in crontab template runs every **Sunday at 10:00 in the deployment host's local time zone**. It loads protected configuration, creates the project log directory, publishes local Gold, and only after a successful `run-daily` synchronizes PostgreSQL:
 
 ```cron
-0 10 * * 0 /srv/market-regime-loader/ops/run-market-regime-loader-sunday.sh
+0 10 * * 0 /srv/regime-data-loader/ops/run-regime-data-loader-sunday.sh
 ```
 
-The runner script resolves its project root, exports the protected `config.yaml`, creates `.logs`, and appends both command streams to `market-regime-loader.log`. The PostgreSQL sync runs only after `run-daily` succeeds.
+The runner script resolves its project root, exports the protected `config.yaml`, creates `.logs`, and appends both command streams to `regime-data-loader.log`. The PostgreSQL sync runs only after `run-daily` succeeds.
 
 Install it for the service account after reviewing the absolute project path:
 
 ```bash
-crontab ops/market-regime-loader.cron
+crontab ops/regime-data-loader.cron
 ```
 
 Operational semantics are explicit:
 
 - `run-daily` failure prevents PostgreSQL synchronization;
 - `gold-sync-postgres` failure makes the cron job non-zero but does **not** roll back or invalidate the already published local Gold build;
-- after a database-only failure, retry only `uv run market-regime-loader --lake-root "$LAKE_ROOT" gold-sync-postgres` rather than rerunning source ingestion;
+- after a database-only failure, retry only `uv run regime-data-loader --lake-root "$LAKE_ROOT" gold-sync-postgres` rather than rerunning source ingestion;
 - the first successful database synchronization is complete; subsequent synchronizations are accumulated deltas and catch up any missed weekly runs;
 - source maximum-history reconciliation remains a separate explicit schedule/command and is never part of the Sunday main chain;
-- both main commands append stdout/stderr to the same `${PROJECT_ROOT}/.logs/market-regime-loader.log` through `LOG_PATH`.
+- both main commands append stdout/stderr to the same `${PROJECT_ROOT}/.logs/regime-data-loader.log` through `LOG_PATH`.
 
 If periodic maximum-history source reconciliation is desired, schedule `reconcile` separately and less frequently. Keeping source reconciliation separate makes the normal bounded source-update contract observable and testable.
 

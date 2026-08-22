@@ -72,7 +72,7 @@ def test_update_sends_exact_bounded_request_and_normalizes_only_ohlc() -> None:
     assert sent.params["period2"] == epoch(END + timedelta(days=1))
     assert sent.params["interval"] == "1d"
     assert sent.url.endswith("/%5EMOVE")
-    assert sent.headers["User-Agent"].startswith("market-regime-loader/")
+    assert sent.headers["User-Agent"].startswith("regime-data-loader/")
     assert frame.get_column("observation_date").to_list() == [START, END]
     assert "volume" not in frame.columns
     assert frame.columns[-4:] == ["open", "high", "low", "close"]

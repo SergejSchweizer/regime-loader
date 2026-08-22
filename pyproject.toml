@@ -3,7 +3,7 @@ requires = ["setuptools>=75", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "market-regime-loader"
+name = "regime-data-loader"
 version = "0.1.0"
 description = "Reusable daily market-state loader"
 readme = "README.md"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-market-regime-loader = "api.cli:main"
+regime-data-loader = "api.cli:main"
 
 [project.optional-dependencies]
 dev = [

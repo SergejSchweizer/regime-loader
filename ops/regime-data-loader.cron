@@ -1,6 +1,6 @@
-# Install with: crontab ops/market-regime-loader.cron
+# Install with: crontab ops/regime-data-loader.cron
 # The deployment host's local time zone determines when this runs.
 # The runner owns configuration export, logging, daily execution, and PostgreSQL sync.
 
 # Sunday at 10:00: publish local Gold, then synchronize PostgreSQL on success.
-0 10 * * 0 /srv/market-regime-loader/ops/run-market-regime-loader-sunday.sh
+0 10 * * 0 /srv/regime-data-loader/ops/run-regime-data-loader-sunday.sh

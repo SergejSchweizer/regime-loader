@@ -1,7 +1,7 @@
 from pathlib import Path
 
-CRON_TEMPLATE = Path("ops/market-regime-loader.cron")
-CRON_RUNNER = Path("ops/run-market-regime-loader-sunday.sh")
+CRON_TEMPLATE = Path("ops/regime-data-loader.cron")
+CRON_RUNNER = Path("ops/run-regime-data-loader-sunday.sh")
 QUALITY_GATES_WORKFLOW = Path(".github/workflows/quality-gates.yml")
 
 
@@ -18,7 +18,7 @@ def test_sunday_gold_sync_cron_template_is_operational() -> None:
     runner = CRON_RUNNER.read_text(encoding="utf-8")
 
     assert job.startswith("0 10 * * 0 ")
-    assert job == "0 10 * * 0 /srv/market-regime-loader/ops/run-market-regime-loader-sunday.sh"
+    assert job == "0 10 * * 0 /srv/regime-data-loader/ops/run-regime-data-loader-sunday.sh"
     assert '"$PROJECT_ROOT/scripts/export_cron_config.py" "$CONFIG_FILE"' in runner
     assert 'mkdir -p "$LOG_DIR"' in runner
     assert 'exec >>"$LOG_PATH" 2>&1' in runner

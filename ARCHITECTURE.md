@@ -1,12 +1,12 @@
 # Architecture
 
-This document is the durable engineering contract for `market-regime-loader`.
+This document is the durable engineering contract for `regime-data-loader`.
 
 `BACKLOG.md` defines delivery order and acceptance criteria. `README.md` is the operator/consumer contract. `AGENTS.md` defines coding-agent behavior. None may intentionally contradict this document.
 
 ## System Purpose
 
-`market-regime-loader` is a reusable daily market-state data product. It acquires open/public market and macro series, preserves historical observations, performs bounded incremental source updates during normal operation, normalizes data into a canonical daily representation, derives causal reusable features, and publishes immutable Gold snapshots.
+`regime-data-loader` is a reusable daily market-state data product. It acquires open/public market and macro series, preserves historical observations, performs bounded incremental source updates during normal operation, normalizes data into a canonical daily representation, derives causal reusable features, and publishes immutable Gold snapshots.
 
 It does not own regime classification, HMM states, targets, portfolio optimization, position sizing, or trading execution.
 
@@ -679,4 +679,4 @@ Required classes include:
 
 `crypto-history-loader` remains the design reference for deterministic medallion ownership, Polars/Parquet persistence, restart safety, `timestamp_m1`, Gold JSON manifests, and feature-profile plots.
 
-`market-regime-loader` intentionally uses daily source semantics, monthly Bronze/Silver partitions, strict delta-only normal execution, optional explicit source reconciliation, and a catalog-driven immutable Gold publication model.
+`regime-data-loader` intentionally uses daily source semantics, monthly Bronze/Silver partitions, strict delta-only normal execution, optional explicit source reconciliation, and a catalog-driven immutable Gold publication model.

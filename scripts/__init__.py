@@ -1,1 +1,1 @@
-"""Operational and repository tooling for market-regime-loader."""
+"""Operational and repository tooling for regime-data-loader."""

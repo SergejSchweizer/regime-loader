@@ -1,4 +1,4 @@
-"""Operational CLI composition root for market-regime-loader."""
+"""Operational CLI composition root for regime-data-loader."""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ class PostgresSyncRuntime:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="market-regime-loader")
+    parser = argparse.ArgumentParser(prog="regime-data-loader")
     parser.add_argument("--lake-root", type=Path, default=Path("lake"))
     parser.add_argument("--today", type=date.fromisoformat, default=None)
     parser.add_argument("--overlap-days", type=int, default=7)
@@ -137,7 +137,7 @@ def _git_commit_hash() -> str:
 
 
 def _logger(stderr: TextIO) -> logging.Logger:
-    logger = logging.getLogger("market_regime_loader.cli")
+    logger = logging.getLogger("regime_data_loader.cli")
     logger.handlers.clear()
     logger.propagate = False
     logger.setLevel(logging.INFO)

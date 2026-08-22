@@ -10,8 +10,8 @@ from dataclasses import dataclass
 
 POSTGRES_HOST = "10.10.1.3"
 POSTGRES_PORT = 54321
-POSTGRES_ROLE = "market-regime-loader"
-POSTGRES_SCHEMAS = ("market_regime", "market_regime_sync")
+POSTGRES_ROLE = "regime-data-loader"
+POSTGRES_SCHEMAS = ("regime_data", "regime_data_sync")
 
 
 def _identifier(value: str) -> str:
@@ -90,7 +90,7 @@ BEGIN
               AND (NOT rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole
                    OR rolreplication OR rolbypassrls)
         ) THEN
-            RAISE EXCEPTION 'existing market-regime-loader role has incompatible privileges';
+            RAISE EXCEPTION 'existing regime-data-loader role has incompatible privileges';
         END IF;
         ALTER ROLE {role_i} PASSWORD {password_l};
     END IF;
@@ -103,7 +103,7 @@ GRANT CONNECT ON DATABASE {database_i} TO {role_i};
 DO $verify$
 BEGIN
     IF {ownership_checks} THEN
-        RAISE EXCEPTION 'market-regime-loader schema ownership is incompatible';
+        RAISE EXCEPTION 'regime-data-loader schema ownership is incompatible';
     END IF;
 END
 $verify$;

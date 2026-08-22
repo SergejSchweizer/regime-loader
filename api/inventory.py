@@ -28,7 +28,7 @@ INVENTORY_FIELDS = (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="market-regime-loader inventory")
+    parser = argparse.ArgumentParser(prog="regime-data-loader inventory")
     parser.add_argument("--lake-root", type=Path, default=Path("lake"))
     parser.add_argument("--series", action="append", default=[])
     parser.add_argument("--provider", action="append", default=[])

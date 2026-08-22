@@ -28,7 +28,7 @@ def _frame() -> pl.DataFrame:
 def _postgres_env(monkeypatch: pytest.MonkeyPatch, *, password: str = "repo-secret") -> None:
     monkeypatch.setenv("PGHOST", "10.10.1.3")
     monkeypatch.setenv("PGPORT", "54321")
-    monkeypatch.setenv("PGUSER", "market-regime-loader")
+    monkeypatch.setenv("PGUSER", "regime-data-loader")
     monkeypatch.setenv("PGDATABASE", "quant_data")
     monkeypatch.setenv("PGPASSWORD", password)
 
@@ -70,7 +70,7 @@ def test_postgres_runtime_composition_uses_exact_protected_endpoint_without_conn
     assert isinstance(config, cli.PostgresSyncConfig)
     assert config.host == "10.10.1.3"
     assert config.port == 54321
-    assert config.user == "market-regime-loader"
+    assert config.user == "regime-data-loader"
     assert config.database == "quant_data"
     assert config.password == "repo-secret"
     assert "repo-secret" not in repr(config)
@@ -171,7 +171,7 @@ def test_postgres_failure_is_nonzero_and_redacts_password_and_credential_text(
 ) -> None:
     _postgres_env(monkeypatch)
     stderr = io.StringIO()
-    credential_text = "postgresql://market-regime-loader:repo-secret@10.10.1.3:54321/quant_data"
+    credential_text = "postgresql://regime-data-loader:repo-secret@10.10.1.3:54321/quant_data"
 
     def broken_runtime(**kwargs: object) -> cli.PostgresSyncRuntime:
         raise RuntimeError(f"database failed: {credential_text}")

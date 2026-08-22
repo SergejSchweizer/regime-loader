@@ -55,11 +55,11 @@ def _record(*, schema: int = 1, feature: int = 1, current: bool = True) -> GoldC
 def test_only_one_gold_dataset_and_exact_postgres_identities() -> None:
     assert POSTGRES_DATASET_ID == "regime_features_daily"
     assert (POSTGRES_CONSUMER_SCHEMA, POSTGRES_CONSUMER_TABLE) == (
-        "market_regime",
+        "regime_data",
         "regime_features_daily",
     )
     assert (POSTGRES_SYNC_SCHEMA, POSTGRES_SYNC_STATE_TABLE, POSTGRES_ROW_HASH_TABLE) == (
-        "market_regime_sync",
+        "regime_data_sync",
         "gold_sync_state",
         "gold_row_hashes",
     )

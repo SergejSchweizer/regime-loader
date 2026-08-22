@@ -1,1 +1,1 @@
-"""CLI adapters for market-regime-loader."""
+"""CLI adapters for regime-data-loader."""

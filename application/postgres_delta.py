@@ -18,7 +18,7 @@ from application.postgres_sync import (
 )
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
-_DIGEST_PREFIX = b"market-regime-loader:gold-row:v1\x00"
+_DIGEST_PREFIX = b"regime-data-loader:gold-row:v1\x00"
 
 
 def _epoch_microseconds(value: datetime) -> int:
