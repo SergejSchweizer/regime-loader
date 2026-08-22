@@ -1,4 +1,4 @@
-# MARKET-REGIME-LOADER
+# REGIME-DATA-LOADER
 
 Reusable daily market-state loader for quantitative research and portfolio systems.
 
