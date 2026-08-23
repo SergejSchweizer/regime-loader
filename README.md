@@ -256,9 +256,9 @@ PostgreSQL is a serving/research replica, not the canonical data store. The only
 
 ```text
 canonical source: lake/gold/dataset=regime_features_daily/...
-consumer table:  regime_data.regime_features_daily
-sync state:      regime_data_sync.gold_sync_state
-row digests:     regime_data_sync.gold_row_hashes
+consumer table:  regime_loader.regime_features_daily
+sync state:      regime_loader_sync.gold_sync_state
+row digests:     regime_loader_sync.gold_row_hashes
 ```
 
 `timestamp_m1` is stored as `TIMESTAMPTZ(6)` and the database session is UTC. Feature columns are nullable `DOUBLE PRECISION`. Sync metadata never pollutes the consumer table.

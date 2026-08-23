@@ -1542,7 +1542,7 @@ Design patterns: Command, Least Privilege, Idempotent Provisioning.
 
 Description:
 - R1: Provision or validate exactly the `regime-loader` LOGIN role at the dedicated endpoint.
-- R2: Enforce least-privilege attributes and only the `regime_data` and `regime_data_sync` schema rights.
+- R2: Enforce least-privilege attributes and only the `regime_loader` and `regime_loader_sync` schema rights.
 - R3: Keep administrator and runtime credentials separate, protected, redacted, and idempotent; incompatible state fails safely.
 
 Acceptance:

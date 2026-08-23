@@ -44,9 +44,9 @@ def test_sql_is_least_privilege_and_schema_scoped() -> None:
         "NOBYPASSRLS",
     ):
         assert token in sql
-    assert POSTGRES_SCHEMAS == ("regime_data", "regime_data_sync")
-    assert 'CREATE SCHEMA IF NOT EXISTS "regime_data"' in sql
-    assert 'CREATE SCHEMA IF NOT EXISTS "regime_data_sync"' in sql
+    assert POSTGRES_SCHEMAS == ("regime_loader", "regime_loader_sync")
+    assert 'CREATE SCHEMA IF NOT EXISTS "regime_loader"' in sql
+    assert 'CREATE SCHEMA IF NOT EXISTS "regime_loader_sync"' in sql
     assert "GRANT ALL" not in sql
     assert "public" not in {schema.lower() for schema in POSTGRES_SCHEMAS}
 

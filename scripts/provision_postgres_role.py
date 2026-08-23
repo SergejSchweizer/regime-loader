@@ -11,7 +11,7 @@ from dataclasses import dataclass
 POSTGRES_HOST = "10.10.1.3"
 POSTGRES_PORT = 54321
 POSTGRES_ROLE = "regime-loader"
-POSTGRES_SCHEMAS = ("regime_data", "regime_data_sync")
+POSTGRES_SCHEMAS = ("regime_loader", "regime_loader_sync")
 
 
 def _identifier(value: str) -> str:

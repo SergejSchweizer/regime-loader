@@ -15,9 +15,9 @@ from application.gold_catalog import (
 from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
 
 POSTGRES_DATASET_ID = "regime_features_daily"
-POSTGRES_CONSUMER_SCHEMA = "regime_data"
+POSTGRES_CONSUMER_SCHEMA = "regime_loader"
 POSTGRES_CONSUMER_TABLE = "regime_features_daily"
-POSTGRES_SYNC_SCHEMA = "regime_data_sync"
+POSTGRES_SYNC_SCHEMA = "regime_loader_sync"
 POSTGRES_SYNC_STATE_TABLE = "gold_sync_state"
 POSTGRES_ROW_HASH_TABLE = "gold_row_hashes"
 POSTGRES_TIMESTAMP_COLUMN = "timestamp_m1"
