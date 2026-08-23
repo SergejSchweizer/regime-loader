@@ -18,7 +18,7 @@ def test_sunday_gold_sync_cron_template_is_operational() -> None:
     runner = CRON_RUNNER.read_text(encoding="utf-8")
 
     assert job.startswith("0 10 * * 0 ")
-    assert job == "0 10 * * 0 /srv/regime-loader/ops/run-regime-loader-sunday.sh"
+    assert job == "0 10 * * 0 /home/dev_market/regime-loader/ops/run-regime-loader-sunday.sh"
     assert '"$PROJECT_ROOT/scripts/export_cron_config.py" "$CONFIG_FILE"' in runner
     assert 'mkdir -p "$LOG_DIR"' in runner
     assert 'exec >>"$LOG_PATH" 2>&1' in runner

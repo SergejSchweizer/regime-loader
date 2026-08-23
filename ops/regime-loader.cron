@@ -3,4 +3,4 @@
 # The runner owns configuration export, logging, daily execution, and PostgreSQL sync.
 
 # Sunday at 10:00: publish local Gold, then synchronize PostgreSQL on success.
-0 10 * * 0 /srv/regime-loader/ops/run-regime-loader-sunday.sh
+0 10 * * 0 /home/dev_market/regime-loader/ops/run-regime-loader-sunday.sh

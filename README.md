@@ -377,7 +377,7 @@ The optional Gold mirror still runs only as part of local publication; a Postgre
 The data lake is intended to run on the deployment host/NAS, not as scheduled GitHub Actions ingestion. The checked-in crontab template runs every **Sunday at 10:00 in the deployment host's local time zone**. It loads protected configuration, creates the project log directory, publishes local Gold, and only after a successful `run-daily` synchronizes PostgreSQL:
 
 ```cron
-0 10 * * 0 /srv/regime-loader/ops/run-regime-loader-sunday.sh
+0 10 * * 0 /home/dev_market/regime-loader/ops/run-regime-loader-sunday.sh
 ```
 
 The runner script resolves its project root, exports the protected `config.yaml`, creates `.logs`, and appends both command streams to `regime-loader.log`. The PostgreSQL sync runs only after `run-daily` succeeds.
