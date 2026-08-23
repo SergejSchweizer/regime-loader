@@ -1,1 +1,1 @@
-"""Operational and repository tooling for regime-data-loader."""
+"""Operational and repository tooling for regime-loader."""

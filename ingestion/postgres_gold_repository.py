@@ -28,7 +28,7 @@ from application.postgres_sync import (
 
 POSTGRES_HOST = "10.10.1.3"
 POSTGRES_PORT = 54321
-POSTGRES_USER = "regime-data-loader"
+POSTGRES_USER = "regime-loader"
 
 
 class PostgresGoldRepositoryError(RuntimeError):

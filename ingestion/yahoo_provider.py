@@ -18,7 +18,7 @@ from application.ports.market_data import ProviderRequest
 Clock = Callable[[], datetime]
 _DEFAULT_BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
 _YAHOO_USER_AGENT = (
-    "regime-data-loader/0.1 (+https://github.com/SergejSchweizer/regime-data-loader)"
+    "regime-loader/0.1 (+https://github.com/SergejSchweizer/regime-loader)"
 )
 
 

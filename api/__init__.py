@@ -1,1 +1,1 @@
-"""CLI adapters for regime-data-loader."""
+"""CLI adapters for regime-loader."""

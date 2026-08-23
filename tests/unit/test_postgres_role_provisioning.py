@@ -26,7 +26,7 @@ def _env() -> dict[str, str]:
 def test_exact_endpoint_and_repository_role() -> None:
     config = ProvisioningConfig.from_env(_env())
     assert (config.host, config.port) == (POSTGRES_HOST, POSTGRES_PORT)
-    assert POSTGRES_ROLE == "regime-data-loader"
+    assert POSTGRES_ROLE == "regime-loader"
     command = psql_command(config)
     assert command[command.index("--host") + 1] == "10.10.1.3"
     assert command[command.index("--port") + 1] == "54321"
@@ -34,7 +34,7 @@ def test_exact_endpoint_and_repository_role() -> None:
 
 def test_sql_is_least_privilege_and_schema_scoped() -> None:
     sql = provision_sql("quant_data", "repo-secret")
-    assert 'CREATE ROLE "regime-data-loader"' in sql
+    assert 'CREATE ROLE "regime-loader"' in sql
     for token in (
         "LOGIN PASSWORD",
         "NOSUPERUSER",
@@ -55,7 +55,7 @@ def test_sql_is_idempotent_and_fails_on_incompatible_existing_state() -> None:
     sql = provision_sql("quant_data", "repo-secret")
     assert "IF NOT EXISTS (SELECT 1 FROM pg_roles" in sql
     assert "CREATE SCHEMA IF NOT EXISTS" in sql
-    assert "existing regime-data-loader role has incompatible privileges" in sql
+    assert "existing regime-loader role has incompatible privileges" in sql
     assert "schema ownership is incompatible" in sql
 
 

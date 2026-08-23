@@ -133,12 +133,12 @@ def test_config_requires_exact_endpoint_role_and_hides_password() -> None:
         {
             "PGHOST": "10.10.1.3",
             "PGPORT": "54321",
-            "PGUSER": "regime-data-loader",
+            "PGUSER": "regime-loader",
             "PGDATABASE": "quant_data",
             "PGPASSWORD": "repo-secret",
         }
     )
-    assert (config.host, config.port, config.user) == ("10.10.1.3", 54321, "regime-data-loader")
+    assert (config.host, config.port, config.user) == ("10.10.1.3", 54321, "regime-loader")
     assert "repo-secret" not in repr(config)
     with pytest.raises(ValueError, match="host"):
         PostgresSyncConfig("localhost", 54321, POSTGRES_USER, "quant_data", "x")

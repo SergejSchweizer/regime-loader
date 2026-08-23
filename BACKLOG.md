@@ -1,6 +1,6 @@
 # Backlog
 
-This backlog is the implementation source of truth for `regime-data-loader`.
+This backlog is the implementation source of truth for `regime-loader`.
 
 The repository loads reusable daily market-state inputs from open/public sources, preserves source history, performs strict incremental updates during normal execution, and publishes deterministic immutable Gold feature snapshots through a Bronze -> Silver -> Gold architecture.
 
@@ -1408,12 +1408,12 @@ MVP is complete only when PR-01 through PR-24 are merged and:
 This section consolidates the former `BACKLOG_POSTGRES.md`. Only the canonical
 Gold dataset is replicated to PostgreSQL; Parquet Gold remains authoritative.
 The target is `10.10.1.3:54321`, the application role is exactly
-`regime-data-loader`, and credentials are runtime-only and never committed,
+`regime-loader`, and credentials are runtime-only and never committed,
 logged, or persisted. PostgreSQL stores `timestamp_m1` as `TIMESTAMPTZ(6)` in
 UTC. The first synchronization loads the complete current Gold history; later
 synchronizations reconcile the complete row-digest state, including missed
 runs and historical corrections. Sync logs use the existing
-`${PROJECT_ROOT}/.logs/regime-data-loader.log` path.
+`${PROJECT_ROOT}/.logs/regime-loader.log` path.
 
 Dependency graph:
 
@@ -1441,7 +1441,7 @@ Design patterns: Specification/Policy Object; Architectural baseline only.
 Description:
 - R1: Define PR-31 through PR-39 with exact dependencies, Git metadata, and one-to-one requirements and acceptance criteria.
 - R2: Define Gold-only serving to PostgreSQL at `10.10.1.3:54321`; Parquet Gold remains authoritative.
-- R3: Define the dedicated `regime-data-loader` runtime role and protected credential handling.
+- R3: Define the dedicated `regime-loader` runtime role and protected credential handling.
 - R4: Define UTC `timestamp_m1` storage as `TIMESTAMPTZ(6)` and observation-day identity.
 - R5: Define complete bootstrap and complete accumulated-delta reconciliation semantics.
 - R6: Define the shared project log path and an executable offline governance contract.
@@ -1541,7 +1541,7 @@ Commit: `feat(pr-35): postgres-service-role-provisioning add least privilege rol
 Design patterns: Command, Least Privilege, Idempotent Provisioning.
 
 Description:
-- R1: Provision or validate exactly the `regime-data-loader` LOGIN role at the dedicated endpoint.
+- R1: Provision or validate exactly the `regime-loader` LOGIN role at the dedicated endpoint.
 - R2: Enforce least-privilege attributes and only the `regime_data` and `regime_data_sync` schema rights.
 - R3: Keep administrator and runtime credentials separate, protected, redacted, and idempotent; incompatible state fails safely.
 
@@ -1566,7 +1566,7 @@ Design patterns: Adapter, Dependency Injection.
 Description:
 - R1: Extend protected ignored YAML config with exact PostgreSQL host, port, role, database, and password settings.
 - R2: Export shell-safe `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, and `PGPASSWORD`; validate and redact failures.
-- R3: Define `${PROJECT_ROOT}/.logs/regime-data-loader.log` as the canonical log path.
+- R3: Define `${PROJECT_ROOT}/.logs/regime-loader.log` as the canonical log path.
 
 Acceptance:
 - A1 (verifies R1): valid settings resolve exactly.
