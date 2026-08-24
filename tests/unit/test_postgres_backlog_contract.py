@@ -31,6 +31,8 @@ REQUIRED_FIELDS = (
     "Commit",
     "Design patterns",
 )
+LEGACY_POSTGRES_FIRST = 31
+LEGACY_POSTGRES_LAST = 39
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +69,14 @@ def _requirement_ids(section: BacklogPr, prefix: str) -> list[int]:
 
 
 def _validate(text: str) -> list[BacklogPr]:
-    sections = [section for section in _sections(text) if int(section.pr_id[3:]) >= 31]
-    assert [section.pr_id for section in sections] == [f"PR-{value:02d}" for value in range(31, 40)]
+    sections = [
+        section
+        for section in _sections(text)
+        if LEGACY_POSTGRES_FIRST <= int(section.pr_id[3:]) <= LEGACY_POSTGRES_LAST
+    ]
+    assert [section.pr_id for section in sections] == [
+        f"PR-{value:02d}" for value in range(LEGACY_POSTGRES_FIRST, LEGACY_POSTGRES_LAST + 1)
+    ]
     for section in sections:
         fields = {name: _field(section, name) for name in REQUIRED_FIELDS}
         pr_lower = section.pr_id.lower()
@@ -104,9 +112,9 @@ def _validate(text: str) -> list[BacklogPr]:
     return sections
 
 
-def test_postgres_backlog_contract() -> None:
+def test_legacy_postgres_backlog_contract() -> None:
     sections = _validate(BACKLOG.read_text(encoding="utf-8"))
-    assert len(sections) == 9
+    assert len(sections) == LEGACY_POSTGRES_LAST - LEGACY_POSTGRES_FIRST + 1
 
 
 def test_validator_rejects_missing_pr_name_in_branch() -> None:
