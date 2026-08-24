@@ -42,7 +42,7 @@ Rules:
 - Branch from dependency-complete `main` only after every `Depends on` PR is merged.
 - Before every commit, verify the active branch is exactly the `Git branch` declared by the backlog PR.
 - Before push: required local quality gate passes and `git status --short` is empty.
-- A pushed branch with any failing required remote gate has Git status `pushed-ci-failing`.
+- A pushed branch with any failing required checks has Git status `pushed-ci-failing`.
 - Before `Ready`: remote `lint`, `type`, `unit`, `integration`, `coverage` are green and Git status is `pushed-ci-green`.
 - Enable PR auto-merge with squash when the PR is ready; protected `main` ensures merge occurs only after the merge gate passes.
 - After merge: update backlog status/PR link/Git status in the next documentation-maintenance change; do not keep an implementation task alive to start another PR.
@@ -607,7 +607,7 @@ Git status: `merged`
 
 Agent lane: Agent A
 
-Depends on: PR-01, PR-02
+Depends on: PR-02, PR-04, PR-05, PR-24
 
 Commit: `feat(pr-08): ingest move index history`
 
