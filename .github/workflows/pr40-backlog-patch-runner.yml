@@ -22,12 +22,12 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import textwrap
 
           source = Path('.github/workflows/pr40-backlog-patch.yml').read_text(encoding='utf-8')
           start = source.index("          python - <<'PY'\n") + len("          python - <<'PY'\n")
           end = source.index("\n          PY\n", start)
-          script = textwrap.dedent(source[start:end])
+          lines = source[start:end].splitlines()
+          script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
           exec(compile(script, '<pr40-backlog-patch>', 'exec'), {'__name__': '__main__'})
           PY
           rm -f .github/workflows/pr40-backlog-patch.yml
