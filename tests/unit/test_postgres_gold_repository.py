@@ -301,7 +301,9 @@ def test_post_write_verification_failure_rolls_back_before_state_write() -> None
     with pytest.raises(PostgresGoldRepositoryError):
         repository.apply_delta(POSTGRES_DATASET_ID, GoldDeltaPlan((), (), (), (), ()), _state())
     queries = _execute_queries(connection)
-    assert not any('INSERT INTO "regime_loader_sync"."gold_sync_state"' in query for query in queries)
+    assert not any(
+        'INSERT INTO "regime_loader_sync"."gold_sync_state"' in query for query in queries
+    )
     assert ("rollback", None, None) in connection.events
 
 

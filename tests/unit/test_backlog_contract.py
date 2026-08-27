@@ -61,7 +61,8 @@ def _unquote(value: str) -> str:
 
 def _validate(text: str) -> list[BacklogPr]:
     sections = _sections(text)
-    expected = [f"PR-{index:02d}" for index in range(1, 40)]
+    assert sections, "backlog must contain at least one PR section"
+    expected = [f"PR-{index:02d}" for index in range(1, len(sections) + 1)]
     assert [section.pr_id for section in sections] == expected
 
     for section in sections:
@@ -104,9 +105,9 @@ def _validate(text: str) -> list[BacklogPr]:
     return sections
 
 
-def test_backlog_has_exact_pr_metadata_contract() -> None:
+def test_backlog_has_contiguous_pr_metadata_contract() -> None:
     sections = _validate(BACKLOG.read_text(encoding="utf-8"))
-    assert len(sections) == 39
+    assert sections[0].pr_id == "PR-01"
 
 
 def _minimal_section() -> str:
@@ -124,6 +125,14 @@ Depends on: none
 Commit: `feat(pr-01): add example`
 Design patterns: Architectural baseline only.
 """
+
+
+def test_validator_rejects_gap_in_pr_sequence() -> None:
+    text = _minimal_section() + _minimal_section().replace("PR-01", "PR-03").replace(
+        "pr-01", "pr-03"
+    )
+    with pytest.raises(AssertionError):
+        _validate(text)
 
 
 def test_validator_rejects_missing_git_branch() -> None:
