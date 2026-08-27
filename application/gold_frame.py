@@ -13,7 +13,7 @@ from application.registry import SERIES_REGISTRY
 from application.silver import SILVER_SCHEMA
 from application.volatility_features import VOLATILITY_SERIES
 
-GOLD_SCHEMA_VERSION = 1
+GOLD_SCHEMA_VERSION = 2
 GOLD_FEATURE_VERSION = 1
 GOLD_SOURCE_SERIES = tuple(SERIES_REGISTRY)
 
@@ -22,6 +22,7 @@ VOLATILITY_FEATURE_COLUMNS = tuple(
     for series_id in VOLATILITY_SERIES
     for column in (
         f"{series_id}_level",
+        f"{series_id}_delta_1obs",
         f"{series_id}_delta_5obs",
         f"{series_id}_delta_20obs",
         f"{series_id}_zscore_60obs",
@@ -36,18 +37,24 @@ VOLATILITY_FEATURE_COLUMNS = tuple(
 
 MACRO_FEATURE_COLUMNS = (
     "ciss_level",
+    "ciss_delta_1obs",
     "ciss_delta_5obs",
     "ciss_delta_20obs",
     "euro_hy_oas_level",
+    "euro_hy_oas_delta_1obs",
     "euro_hy_oas_delta_5obs",
     "euro_hy_oas_delta_20obs",
     "us_2y_level",
+    "us_2y_delta_1obs",
     "us_2y_delta_20obs",
     "us_10y_level",
+    "us_10y_delta_1obs",
     "us_10y_delta_20obs",
     "estr_level",
+    "estr_delta_1obs",
     "estr_delta_20obs",
     "usd_broad_level",
+    "usd_broad_delta_1obs",
     "usd_broad_delta_20obs",
     "us_10y_minus_us_2y",
 )

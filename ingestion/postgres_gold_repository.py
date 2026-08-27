@@ -122,6 +122,10 @@ _CONSUMER_DDL = f"""CREATE TABLE IF NOT EXISTS {_CONSUMER} (
     {_quote("timestamp_m1")} TIMESTAMPTZ(6) NOT NULL PRIMARY KEY,
     {",\n    ".join(f"{_quote(column)} DOUBLE PRECISION NULL" for column in _FEATURE_COLUMNS)}
 )"""
+_CONSUMER_COLUMN_MIGRATIONS = tuple(
+    f"ALTER TABLE {_CONSUMER} ADD COLUMN IF NOT EXISTS {_quote(column)} DOUBLE PRECISION NULL"
+    for column in _FEATURE_COLUMNS
+)
 
 _SYNC_STATE_DDL = f"""CREATE TABLE IF NOT EXISTS {_SYNC_STATE} (
     dataset_id TEXT PRIMARY KEY,
@@ -276,6 +280,8 @@ class PostgresGoldSyncRepository:
             cursor = connection.cursor()
             try:
                 cursor.execute(_CONSUMER_DDL)
+                for statement in _CONSUMER_COLUMN_MIGRATIONS:
+                    cursor.execute(statement)
                 cursor.execute(_SYNC_STATE_DDL)
                 cursor.execute(_ROW_HASH_DDL)
             finally:

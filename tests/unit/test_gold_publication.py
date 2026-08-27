@@ -184,7 +184,7 @@ def test_candidate_version_mismatch_prevents_promotion_and_marks_failed() -> Non
     catalog = FakeCatalog([])
     publisher = GoldPublisher(
         catalog,
-        FakeBundle(schema_version=2),
+        FakeBundle(schema_version=3),
         FakeViews(),
         clock=lambda: START,
     )

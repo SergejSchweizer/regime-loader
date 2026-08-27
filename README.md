@@ -174,6 +174,7 @@ Daily source dates map to UTC midnight. This is **observation-day identity**, no
 Feature semantics are fixed and causal:
 
 - `delta_Nobs(t) = x(t) - x(previous Nth valid observation)`;
+- every source level includes a causal `delta_1obs`; existing 5- and 20-observation deltas remain available according to the feature family;
 - 60-observation z-scores use the last 60 valid observations including `t` and population standard deviation (`ddof=0`);
 - no forward fill, backward fill, interpolation, centered windows, or implicit as-of carry;
 - same-series rolling operations count valid observations, not calendar days;
@@ -183,7 +184,7 @@ Feature semantics are fixed and causal:
 Initial semantic versions:
 
 ```text
-schema_version  = 1
+schema_version  = 2
 feature_version = 1
 ```
 

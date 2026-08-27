@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 
 from application.gold_catalog import LATEST_COMPATIBLE, GoldBuildStatus, GoldCompatibility
-from application.gold_frame import GOLD_COLUMNS
+from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
 from application.gold_publication import GoldPublisher
 from application.gold_retention import GoldRetentionService
 from application.gold_sidecars import GoldSidecarBuilder
@@ -104,7 +104,13 @@ def test_default_retention_marks_then_deletes_oldest_bundle_and_keeps_current_vi
     assert next(record for record in after if record.build_id == current.build_id).current
     assert json.loads(paths.gold_manifest_json().read_bytes())["build_id"] == current.build_id
     assert paths.gold_profile().read_bytes() == current_root_before
-    assert LATEST_COMPATIBLE.resolve(after, GoldCompatibility(1, 1)).build_id == current.build_id
+    assert (
+        LATEST_COMPATIBLE.resolve(
+            after,
+            GoldCompatibility(GOLD_SCHEMA_VERSION, GOLD_FEATURE_VERSION),
+        ).build_id
+        == current.build_id
+    )
 
     rerun = service.run()
     assert rerun.marked_build_ids == ()
@@ -140,7 +146,10 @@ def test_partial_sweep_failure_leaves_unselectable_tombstone_and_retry_cleans_or
     assert paths.gold_build_manifest(oldest.build_id).exists()
     assert paths.gold_build_profile(oldest.build_id).exists()
     assert (
-        LATEST_COMPATIBLE.resolve(catalog.read(), GoldCompatibility(1, 1)).build_id
+        LATEST_COMPATIBLE.resolve(
+            catalog.read(),
+            GoldCompatibility(GOLD_SCHEMA_VERSION, GOLD_FEATURE_VERSION),
+        ).build_id
         == current.build_id
     )
 

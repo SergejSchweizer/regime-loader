@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
-from application.gold_frame import GOLD_COLUMNS
+from application.gold_frame import GOLD_COLUMNS, GOLD_SCHEMA_VERSION
 from application.postgres_sync import (
     POSTGRES_CONSUMER_SCHEMA,
     POSTGRES_CONSUMER_TABLE,
@@ -32,7 +32,9 @@ def _now(day: int = 1) -> datetime:
     return datetime(2026, 8, day, tzinfo=UTC)
 
 
-def _record(*, schema: int = 1, feature: int = 1, current: bool = True) -> GoldCatalogRecord:
+def _record(
+    *, schema: int = GOLD_SCHEMA_VERSION, feature: int = 1, current: bool = True
+) -> GoldCatalogRecord:
     return GoldCatalogRecord(
         dataset_id="regime_features_daily",
         build_id="20260822T100000Z",
@@ -81,7 +83,7 @@ def test_contract_value_objects_and_counts() -> None:
         dataset_id=POSTGRES_DATASET_ID,
         source_build_id="20260822T100000Z",
         data_sha256="b" * 64,
-        schema_version=1,
+        schema_version=GOLD_SCHEMA_VERSION,
         feature_version=1,
         row_count=1,
         min_timestamp=_now(1),
@@ -103,7 +105,7 @@ def test_delta_sets_must_be_disjoint() -> None:
 def test_current_complete_compatible_catalog_record_is_required() -> None:
     assert select_current_sync_record([_record()]).build_id == "20260822T100000Z"
     with pytest.raises(LookupError):
-        select_current_sync_record([_record(schema=2)])
+        select_current_sync_record([_record(schema=3)])
     with pytest.raises(LookupError):
         select_current_sync_record([_record(feature=2)])
     with pytest.raises(LookupError):

@@ -79,10 +79,10 @@ def test_feature_set_hash_covers_order_dtype_versions_and_formula_parameters() -
     base = feature_set_sha256(frame)
     assert len(base) == 64
     assert base == feature_set_sha256(frame)
-    assert base != feature_set_sha256(frame, schema_version=2)
+    assert base != feature_set_sha256(frame, schema_version=3)
     assert base != feature_set_sha256(frame, feature_version=2)
     changed_formula = dict(GOLD_FORMULA_PARAMETERS)
-    changed_formula["volatility_delta_observations"] = [4, 20]
+    changed_formula["observation_delta_observations"] = [4, 20]
     assert base != feature_set_sha256(frame, formula_parameters=changed_formula)
     reordered = frame.select(["timestamp_m1", *reversed(GOLD_COLUMNS[1:])])
     assert base != feature_set_sha256(reordered)

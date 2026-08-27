@@ -11,7 +11,7 @@ from application.bronze_orchestration import BronzeOrchestrator
 from application.contracts import NativeShape, Provider, SeriesContract
 from application.daily_pipeline import DailyMedallionPipeline
 from application.gold_catalog import LATEST_COMPATIBLE, STRICT_CURRENT, GoldCompatibility
-from application.gold_frame import GOLD_COLUMNS
+from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
 from application.gold_publication import GoldPublisher
 from application.gold_retention import GoldRetentionService
 from application.gold_sidecars import GoldSidecarBuilder
@@ -298,7 +298,7 @@ def test_full_offline_daily_delta_reconcile_publication_retention_and_inventory(
     assert len(pruned) == 1
     assert pruned[0].data_path is None
     current = next(record for record in records if record.current)
-    compatibility = GoldCompatibility(1, 1)
+    compatibility = GoldCompatibility(GOLD_SCHEMA_VERSION, GOLD_FEATURE_VERSION)
     assert STRICT_CURRENT.resolve(records, compatibility) == current
     assert LATEST_COMPATIBLE.resolve(records, compatibility) == current
     assert not paths.gold_build_root(pruned[0].build_id).exists()

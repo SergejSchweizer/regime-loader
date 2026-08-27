@@ -16,12 +16,13 @@ MACRO_SERIES = ("ciss", "euro_hy_oas", "us_2y", "us_10y", "estr", "usd_broad")
 class MacroFeaturePolicy:
     """Source-controlled observation-lag policy for macro features."""
 
+    immediate_lag: int = 1
     short_lag: int = 5
     long_lag: int = 20
 
     def __post_init__(self) -> None:
-        if self.short_lag != 5 or self.long_lag != 20:
-            raise ValueError("macro observation lags are fixed at 5 and 20")
+        if (self.immediate_lag, self.short_lag, self.long_lag) != (1, 5, 20):
+            raise ValueError("macro observation lags are fixed at 1, 5, and 20")
 
 
 MACRO_POLICY = MacroFeaturePolicy()
@@ -86,16 +87,24 @@ def build_macro_features(
     if missing:
         raise KeyError(f"missing Silver macro series: {', '.join(missing)}")
     frames = [
-        _series_frame("ciss", silver_by_series["ciss"], (policy.short_lag, policy.long_lag)),
+        _series_frame(
+            "ciss",
+            silver_by_series["ciss"],
+            (policy.immediate_lag, policy.short_lag, policy.long_lag),
+        ),
         _series_frame(
             "euro_hy_oas",
             silver_by_series["euro_hy_oas"],
-            (policy.short_lag, policy.long_lag),
+            (policy.immediate_lag, policy.short_lag, policy.long_lag),
         ),
-        _series_frame("us_2y", silver_by_series["us_2y"], (policy.long_lag,)),
-        _series_frame("us_10y", silver_by_series["us_10y"], (policy.long_lag,)),
-        _series_frame("estr", silver_by_series["estr"], (policy.long_lag,)),
-        _series_frame("usd_broad", silver_by_series["usd_broad"], (policy.long_lag,)),
+        _series_frame("us_2y", silver_by_series["us_2y"], (policy.immediate_lag, policy.long_lag)),
+        _series_frame(
+            "us_10y", silver_by_series["us_10y"], (policy.immediate_lag, policy.long_lag)
+        ),
+        _series_frame("estr", silver_by_series["estr"], (policy.immediate_lag, policy.long_lag)),
+        _series_frame(
+            "usd_broad", silver_by_series["usd_broad"], (policy.immediate_lag, policy.long_lag)
+        ),
     ]
     joined = _outer_join(frames).with_columns(
         (pl.col("us_10y_level") - pl.col("us_2y_level")).alias("us_10y_minus_us_2y")

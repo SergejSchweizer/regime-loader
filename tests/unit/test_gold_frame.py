@@ -75,7 +75,7 @@ def test_outer_union_exact_order_versions_and_provenance() -> None:
     assert build.frame.get_column("timestamp_m1").to_list() == [t1, t2, t3]
     assert build.frame.filter(pl.col("timestamp_m1") == t1).item(0, "ciss_level") is None
     assert build.frame.filter(pl.col("timestamp_m1") == t3).item(0, "vix_level") is None
-    assert build.schema_version == GOLD_SCHEMA_VERSION == 1
+    assert build.schema_version == GOLD_SCHEMA_VERSION == 2
     assert build.feature_version == GOLD_FEATURE_VERSION == 1
     assert [item.series_id for item in build.inputs] == list(GOLD_SOURCE_SERIES)
     assert all(len(item.sha256) == 64 for item in build.inputs)
@@ -91,6 +91,7 @@ def test_real_feature_build_matches_hand_calculated_known_timestamp() -> None:
     row = build.frame.filter(pl.col("timestamp_m1") == timestamp)
     assert row.height == 1
     assert row.item(0, "vix_level") == pytest.approx(60.0)
+    assert row.item(0, "vix_delta_1obs") == pytest.approx(1.0)
     assert row.item(0, "vix_delta_5obs") == pytest.approx(5.0)
     assert row.item(0, "vix_delta_20obs") == pytest.approx(20.0)
     expected_z = (60.0 - statistics.mean(range(1, 61))) / statistics.pstdev(range(1, 61))
@@ -161,7 +162,7 @@ def test_feature_schema_versions_and_provenance_are_fail_closed() -> None:
     with pytest.raises(ValueError, match="identity mismatch"):
         assemble_gold_frame(volatility, macro, silver)
     with pytest.raises(ValueError, match="schema_version"):
-        GoldSemanticVersions(schema_version=2)
+        GoldSemanticVersions(schema_version=1)
     with pytest.raises(ValueError, match="feature_version"):
         GoldSemanticVersions(feature_version=2)
 
