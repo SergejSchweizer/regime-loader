@@ -1,7 +1,9 @@
 import fcntl
 import os
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 CRON_TEMPLATE = Path("ops/regime-loader.cron")
 CRON_RUNNER = Path("ops/run-regime-loader-sunday.sh")
@@ -12,8 +14,17 @@ def _job_line() -> str:
     return next(
         line
         for line in CRON_TEMPLATE.read_text(encoding="utf-8").splitlines()
-        if line and not line.startswith("#")
+        if line and not line.startswith("#") and not line.startswith("CRON_TZ=")
     )
+
+
+def test_sunday_gold_sync_cron_template_has_explicit_vienna_timezone_and_dst() -> None:
+    text = CRON_TEMPLATE.read_text(encoding="utf-8")
+    vienna = ZoneInfo("Europe/Vienna")
+
+    assert "CRON_TZ=Europe/Vienna" in text
+    assert datetime(2026, 1, 4, 10, tzinfo=vienna).utcoffset() == timedelta(hours=1)
+    assert datetime(2026, 7, 5, 10, tzinfo=vienna).utcoffset() == timedelta(hours=2)
 
 
 def test_sunday_gold_sync_cron_template_is_operational() -> None:
@@ -40,7 +51,11 @@ def test_sunday_gold_sync_cron_template_is_operational() -> None:
 
 def test_cron_template_has_exactly_one_job_and_no_database_secret_literal() -> None:
     text = CRON_TEMPLATE.read_text(encoding="utf-8")
-    jobs = [line for line in text.splitlines() if line and not line.startswith("#")]
+    jobs = [
+        line
+        for line in text.splitlines()
+        if line and not line.startswith("#") and not line.startswith("CRON_TZ=")
+    ]
 
     assert jobs == [_job_line()]
     assert "PGPASSWORD=" not in text
