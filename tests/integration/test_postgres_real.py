@@ -101,8 +101,17 @@ def test_real_postgres_schema_utc_transaction_lock_and_round_trip(
     assert repository.summary(POSTGRES_DATASET_ID).row_count == 1
     assert repository.read_digests(POSTGRES_DATASET_ID) == (digest,)
     assert repository.read_state(POSTGRES_DATASET_ID) == _state(timestamp)
+    repository_connection = repository._open()
+    try:
+        cursor = repository_connection.cursor()
+        try:
+            cursor.execute("SHOW TIME ZONE")
+            assert cursor.fetchone() == ("UTC",)
+        finally:
+            cursor.close()
+    finally:
+        repository_connection.close()
     with psycopg.connect(postgres_dsn) as connection:
-        assert connection.execute("SHOW TIME ZONE").fetchone() == ("Etc/UTC",)
         connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (POSTGRES_DATASET_ID,))
         connection.execute(_ROLLBACK_STATE_SQL, ("c" * 64, timestamp))
         connection.rollback()
