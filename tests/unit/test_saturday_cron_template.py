@@ -74,7 +74,8 @@ def _runner_fixture(tmp_path: Path, git_exit_code: int = 0) -> tuple[Path, Path]
         project_root / ".venv" / "bin" / "regime-loader",
         "#!/usr/bin/env bash\n"
         'printf \'%s|%s|%s\\n\' "$PWD" "$REGIME_LOADER_GIT_SHA" "$*" '
-        '>> "$RUNNER_RECORD"\n',
+        '>> "$RUNNER_RECORD"\n'
+        'if [[ "${RUNNER_FAIL_DAILY:-}" == "true" && "$*" == *"run-daily" ]]; then exit 7; fi\n',
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -164,3 +165,41 @@ def test_sunday_runner_rejects_lock_contention_before_any_cli_command(tmp_path: 
     assert completed.returncode == 3
     assert "already running" in completed.stderr
     assert not record_path.exists()
+
+
+def test_sunday_runner_releases_lock_after_daily_failure_and_skips_postgres_sync(
+    tmp_path: Path,
+) -> None:
+    project_root, bin_dir = _runner_fixture(tmp_path)
+    record_path = tmp_path / "runner-record"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "RUNNER_RECORD": str(record_path),
+        "RUNNER_FAIL_DAILY": "true",
+    }
+
+    failed = subprocess.run(
+        [str(project_root / "ops" / "run-regime-loader-sunday.sh")],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    retry = subprocess.run(
+        [str(project_root / "ops" / "run-regime-loader-sunday.sh")],
+        cwd=tmp_path,
+        env={key: value for key, value in environment.items() if key != "RUNNER_FAIL_DAILY"},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert failed.returncode == 7
+    assert retry.returncode == 0
+    assert record_path.read_text(encoding="utf-8").splitlines() == [
+        f"{project_root}|fixture-sha|--lake-root fixture-lake run-daily",
+        f"{project_root}|fixture-sha|--lake-root fixture-lake run-daily",
+        f"{project_root}|fixture-sha|--lake-root fixture-lake gold-sync-postgres",
+    ]
