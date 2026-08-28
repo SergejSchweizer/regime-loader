@@ -80,6 +80,7 @@ def test_parser_exposes_exact_operational_command_surface() -> None:
         "silver-build",
         "gold-build",
         "gold-sync-postgres",
+        "postgres-migrate",
         "inventory",
         "run-daily",
     }

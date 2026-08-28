@@ -33,6 +33,14 @@ def _postgres_env(monkeypatch: pytest.MonkeyPatch, *, password: str = "repo-secr
     monkeypatch.setenv("PGPASSWORD", password)
 
 
+def _postgres_admin_env(monkeypatch: pytest.MonkeyPatch, *, password: str = "admin-secret") -> None:
+    monkeypatch.setenv("MARKET_REGIME_POSTGRES_ADMIN_HOST", "10.10.1.3")
+    monkeypatch.setenv("MARKET_REGIME_POSTGRES_ADMIN_PORT", "54321")
+    monkeypatch.setenv("MARKET_REGIME_POSTGRES_ADMIN_USER", "regime-loader-admin")
+    monkeypatch.setenv("MARKET_REGIME_POSTGRES_ADMIN_DATABASE", "quant_data")
+    monkeypatch.setenv("MARKET_REGIME_POSTGRES_ADMIN_PASSWORD", password)
+
+
 def test_filesystem_gold_source_hashes_and_reads_only_contained_catalog_path(
     tmp_path: Path,
 ) -> None:
@@ -112,6 +120,42 @@ def test_missing_postgres_config_fails_before_repository_or_provider_runtime_cre
     assert payload["command"] == "gold-sync-postgres"
     assert payload["stage"] == "configuration"
     assert payload["status"] == "failed"
+
+
+def test_postgres_migration_composition_uses_only_distinct_admin_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _postgres_admin_env(monkeypatch)
+    captured: list[object] = []
+
+    class MigratorStub:
+        def __init__(self, config: object) -> None:
+            captured.append(config)
+
+    monkeypatch.setattr(cli, "PostgresGoldSchemaMigrator", MigratorStub)
+    runtime = cli.build_postgres_migration_runtime(stderr=io.StringIO())
+
+    assert runtime.migrator is not None
+    assert len(captured) == 1
+    config = captured[0]
+    assert isinstance(config, cli.PostgresAdminConfig)
+    assert config.user == "regime-loader-admin"
+    assert "admin-secret" not in repr(config)
+
+
+def test_postgres_migration_failure_redacts_admin_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    _postgres_admin_env(monkeypatch)
+    stderr = io.StringIO()
+
+    def broken_runtime(**kwargs: object) -> cli.PostgresMigrationRuntime:
+        raise RuntimeError("migration failed: admin-secret")
+
+    monkeypatch.setattr(cli, "build_postgres_migration_runtime", broken_runtime)
+    code = cli.main(["postgres-migrate"], stdout=io.StringIO(), stderr=stderr)
+
+    assert code == cli.EXIT_PIPELINE
+    assert "admin-secret" not in stderr.getvalue()
+    assert json.loads(stderr.getvalue())["command"] == "postgres-migrate"
 
 
 def test_gold_sync_command_dispatches_only_sync_service_and_logs_exact_result(

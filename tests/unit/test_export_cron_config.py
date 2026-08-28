@@ -24,6 +24,7 @@ def _config(*, password: str = "repo secret", user: str = "regime-loader") -> st
 secrets:
   fred_api_key: secret key
   postgres_password: {password!r}
+postgres_admin_password: admin secret
 """
 
 
@@ -49,6 +50,8 @@ def test_export_cron_config_quotes_required_runtime_and_postgres_values(tmp_path
     assert values["PGUSER"] == "regime-loader"
     assert values["PGDATABASE"] == "quant_data"
     assert values["PGPASSWORD"] == "repo secret"
+    assert all("ADMIN" not in name for name in values)
+    assert "admin secret" not in export(config)
     assert values["LOG_PATH"] == "/project path/.logs/regime-loader.log"
 
 

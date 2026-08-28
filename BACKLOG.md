@@ -2039,11 +2039,11 @@ Acceptance:
 ## PR-55: Remove Schema DDL From The Normal Runtime Sync Path
 
 PR name: `postgres-admin-runtime-ddl-separation`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: #62
 Git branch: `pr-55/postgres-admin-runtime-ddl-separation`
-Git status: `not-started (branch absent)`
+Git status: `active-clean`
 Agent lane: PostgreSQL privilege boundary; one weak agent
 Depends on: PR-54
 Commit: `refactor(pr-55): separate postgres admin ddl`

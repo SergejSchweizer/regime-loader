@@ -191,12 +191,21 @@ class GoldSyncTransaction(Protocol):
 class GoldSyncRepository(Protocol):
     """Narrow serving-plane Repository port; concrete database client stays outside."""
 
-    def ensure_schema(self) -> None: ...
+    def preflight_schema(self) -> None:
+        """Verify the administered schema is compatible before any row mutation."""
+
+        ...
 
     def run_locked(
         self,
         operation: Callable[[GoldSyncTransaction], TransactionResult],
     ) -> TransactionResult: ...
+
+
+class GoldSchemaMigrator(Protocol):
+    """Admin-only port for applying PostgreSQL serving-schema migrations."""
+
+    def migrate(self) -> None: ...
 
 
 def require_sync_compatible(record: GoldCatalogRecord) -> None:

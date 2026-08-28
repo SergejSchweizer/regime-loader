@@ -19,7 +19,9 @@ from ingestion.postgres_gold_repository import (
     POSTGRES_HOST,
     POSTGRES_PORT,
     POSTGRES_USER,
+    PostgresAdminConfig,
     PostgresGoldRepositoryError,
+    PostgresGoldSchemaMigrator,
     PostgresGoldSyncRepository,
     PostgresLockContentionError,
     PostgresSyncConfig,
@@ -33,6 +35,12 @@ def _ts(day: int) -> datetime:
 
 def _config(password: str = "repo-secret") -> PostgresSyncConfig:
     return PostgresSyncConfig(POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, "quant_data", password)
+
+
+def _admin_config(password: str = "admin-secret") -> PostgresAdminConfig:
+    return PostgresAdminConfig(
+        POSTGRES_HOST, POSTGRES_PORT, "regime-loader-admin", "quant_data", password
+    )
 
 
 def _row(day: int, value: float) -> GoldRowPayload:
@@ -189,6 +197,43 @@ def test_config_requires_exact_endpoint_role_and_hides_password() -> None:
         PostgresSyncConfig.from_mapping({"PGPORT": "invalid"})
 
 
+def test_admin_config_uses_distinct_namespace_role_and_redacted_password() -> None:
+    config = PostgresAdminConfig.from_mapping(
+        {
+            "MARKET_REGIME_POSTGRES_ADMIN_HOST": "10.10.1.3",
+            "MARKET_REGIME_POSTGRES_ADMIN_PORT": "54321",
+            "MARKET_REGIME_POSTGRES_ADMIN_USER": "regime-loader-admin",
+            "MARKET_REGIME_POSTGRES_ADMIN_DATABASE": "quant_data",
+            "MARKET_REGIME_POSTGRES_ADMIN_PASSWORD": "admin-secret",
+        }
+    )
+    assert config.user == "regime-loader-admin"
+    assert "admin-secret" not in repr(config)
+    with pytest.raises(ValueError, match="host"):
+        PostgresAdminConfig("localhost", POSTGRES_PORT, "regime-loader-admin", "quant_data", "x")
+    with pytest.raises(ValueError, match="port"):
+        PostgresAdminConfig(POSTGRES_HOST, 5432, "regime-loader-admin", "quant_data", "x")
+    with pytest.raises(ValueError, match="user"):
+        PostgresAdminConfig(POSTGRES_HOST, POSTGRES_PORT, "", "quant_data", "x")
+    with pytest.raises(ValueError, match="database"):
+        PostgresAdminConfig(POSTGRES_HOST, POSTGRES_PORT, "regime-loader-admin", "", "x")
+    with pytest.raises(ValueError, match="password"):
+        PostgresAdminConfig(POSTGRES_HOST, POSTGRES_PORT, "regime-loader-admin", "quant_data", "")
+    with pytest.raises(ValueError, match="differ from runtime"):
+        PostgresAdminConfig(POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, "quant_data", "x")
+    with pytest.raises(ValueError, match="password must differ"):
+        PostgresAdminConfig.from_mapping(
+            {
+                "MARKET_REGIME_POSTGRES_ADMIN_HOST": "10.10.1.3",
+                "MARKET_REGIME_POSTGRES_ADMIN_PORT": "54321",
+                "MARKET_REGIME_POSTGRES_ADMIN_USER": "regime-loader-admin",
+                "MARKET_REGIME_POSTGRES_ADMIN_DATABASE": "quant_data",
+                "MARKET_REGIME_POSTGRES_ADMIN_PASSWORD": "shared-secret",
+                "PGPASSWORD": "shared-secret",
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -223,11 +268,11 @@ def test_default_connection_passes_connect_timeout_and_application_name(
     assert captured["application_name"] == "regime-loader"
 
 
-def test_schema_migrations_are_gold_only_timestamptz_and_idempotent() -> None:
+def test_admin_schema_migrations_are_gold_only_timestamptz_and_idempotent() -> None:
     connection = FakeConnection()
     factory = Factory(connection)
-    repository = PostgresGoldSyncRepository(_config(), connection_factory=factory)
-    repository.ensure_schema()
+    migrator = PostgresGoldSchemaMigrator(_admin_config(), connection_factory=factory)
+    migrator.migrate()
     queries = _execute_queries(connection)
     assert queries[:5] == [
         "SET application_name = 'regime-loader'",
@@ -251,6 +296,20 @@ def test_schema_migrations_are_gold_only_timestamptz_and_idempotent() -> None:
     assert "DROP TABLE" not in ddl
     assert "CREATE SCHEMA" not in ddl
     assert ("commit", None, None) in connection.events
+
+
+def test_runtime_schema_preflight_is_read_only_and_contains_no_ddl() -> None:
+    connection = FakeConnection()
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+
+    repository.preflight_schema()
+
+    queries = _execute_queries(connection)
+    assert "SET TRANSACTION READ ONLY" in queries
+    prohibited = ("CREATE", "ALTER", "DROP", "TRUNCATE", "GRANT")
+    assert not any(query.startswith(prohibited) for query in queries)
+    assert ("rollback", None, None) in connection.events
+    assert ("commit", None, None) not in connection.events
 
 
 def test_read_state_round_trips_exact_sync_metadata() -> None:
@@ -509,7 +568,7 @@ def test_connection_failure_does_not_echo_password() -> None:
 
     repository = PostgresGoldSyncRepository(_config(), connection_factory=broken_factory)
     with pytest.raises(PostgresGoldRepositoryError) as exc_info:
-        repository.ensure_schema()
+        repository.preflight_schema()
     assert "repo-secret" not in str(exc_info.value)
 
 
