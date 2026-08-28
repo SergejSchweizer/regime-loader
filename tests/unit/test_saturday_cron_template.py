@@ -1,3 +1,4 @@
+import fcntl
 import os
 import subprocess
 from pathlib import Path
@@ -25,6 +26,9 @@ def test_sunday_gold_sync_cron_template_is_operational() -> None:
     assert 'cd "$PROJECT_ROOT"' in runner
     assert 'git -C "$PROJECT_ROOT" rev-parse --verify HEAD' in runner
     assert "export REGIME_LOADER_GIT_SHA" in runner
+    assert 'LOCK_PATH="$LOCK_DIR/regime-loader-sunday.lock"' in runner
+    assert "if ! flock -n 9; then" in runner
+    assert "exit 3" in runner
     assert 'mkdir -p "$LOG_DIR"' in runner
     assert 'exec >>"$LOG_PATH" 2>&1' in runner
     assert '"$CLI" --lake-root "$LAKE_ROOT" run-daily' in runner
@@ -70,7 +74,8 @@ def _runner_fixture(tmp_path: Path, git_exit_code: int = 0) -> tuple[Path, Path]
         project_root / ".venv" / "bin" / "regime-loader",
         "#!/usr/bin/env bash\n"
         'printf \'%s|%s|%s\\n\' "$PWD" "$REGIME_LOADER_GIT_SHA" "$*" '
-        '>> "$RUNNER_RECORD"\n',
+        '>> "$RUNNER_RECORD"\n'
+        'if [[ "${RUNNER_FAIL_DAILY:-}" == "true" && "$*" == *"run-daily" ]]; then exit 7; fi\n',
     )
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -132,3 +137,69 @@ def test_sunday_runner_stops_before_commands_when_git_identity_is_unavailable(
     assert completed.returncode == 2
     assert "Unable to resolve repository Git identity" in completed.stderr
     assert not record_path.exists()
+
+
+def test_sunday_runner_rejects_lock_contention_before_any_cli_command(tmp_path: Path) -> None:
+    project_root, bin_dir = _runner_fixture(tmp_path)
+    lock_dir = project_root / ".locks"
+    lock_dir.mkdir()
+    lock_path = lock_dir / "regime-loader-sunday.lock"
+    record_path = tmp_path / "runner-record"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "RUNNER_RECORD": str(record_path),
+    }
+
+    with lock_path.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        completed = subprocess.run(
+            [str(project_root / "ops" / "run-regime-loader-sunday.sh")],
+            cwd=tmp_path,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    assert completed.returncode == 3
+    assert "already running" in completed.stderr
+    assert not record_path.exists()
+
+
+def test_sunday_runner_releases_lock_after_daily_failure_and_skips_postgres_sync(
+    tmp_path: Path,
+) -> None:
+    project_root, bin_dir = _runner_fixture(tmp_path)
+    record_path = tmp_path / "runner-record"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "RUNNER_RECORD": str(record_path),
+        "RUNNER_FAIL_DAILY": "true",
+    }
+
+    failed = subprocess.run(
+        [str(project_root / "ops" / "run-regime-loader-sunday.sh")],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    retry = subprocess.run(
+        [str(project_root / "ops" / "run-regime-loader-sunday.sh")],
+        cwd=tmp_path,
+        env={key: value for key, value in environment.items() if key != "RUNNER_FAIL_DAILY"},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert failed.returncode == 7
+    assert retry.returncode == 0
+    assert record_path.read_text(encoding="utf-8").splitlines() == [
+        f"{project_root}|fixture-sha|--lake-root fixture-lake run-daily",
+        f"{project_root}|fixture-sha|--lake-root fixture-lake run-daily",
+        f"{project_root}|fixture-sha|--lake-root fixture-lake gold-sync-postgres",
+    ]
