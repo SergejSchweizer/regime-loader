@@ -17,6 +17,7 @@ from application.postgres_sync import (
     GoldSyncRepository,
     GoldSyncResult,
     GoldSyncState,
+    GoldSyncTransaction,
     select_current_sync_record,
 )
 
@@ -63,10 +64,20 @@ class GoldPostgresDeltaSync:
         data_sha256 = self.source.sha256_path(data_path)
         self._validate_sha256(data_sha256)
         desired_state = self._desired_state(record, data_sha256)
+        return self.repository.run_locked(
+            lambda transaction: self._sync_locked(transaction, record, data_path, desired_state)
+        )
 
-        prior_state = self.repository.read_state(POSTGRES_DATASET_ID)
+    def _sync_locked(
+        self,
+        transaction: GoldSyncTransaction,
+        record: GoldCatalogRecord,
+        data_path: str,
+        desired_state: GoldSyncState,
+    ) -> GoldSyncResult:
+        prior_state = transaction.read_state(POSTGRES_DATASET_ID)
         self._require_state_compatible(prior_state, desired_state)
-        target_digests = self.repository.read_digests(POSTGRES_DATASET_ID)
+        target_digests = transaction.read_digests(POSTGRES_DATASET_ID)
         if prior_state is None and target_digests:
             raise GoldSyncVerificationError(
                 "PostgreSQL Gold digests exist without authoritative sync state"
@@ -77,7 +88,7 @@ class GoldPostgresDeltaSync:
             )
 
         if prior_state is not None and self._same_data(prior_state, desired_state):
-            self.repository.apply_delta(
+            transaction.apply_delta(
                 POSTGRES_DATASET_ID,
                 GoldDeltaPlan((), (), (), (), ()),
                 desired_state,
@@ -94,7 +105,7 @@ class GoldPostgresDeltaSync:
         frame = self.source.read_path(data_path)
         self._validate_frame_metadata(frame, record)
         plan = plan_gold_delta(frame, target_digests, prior_state)
-        self.repository.apply_delta(POSTGRES_DATASET_ID, plan, desired_state)
+        transaction.apply_delta(POSTGRES_DATASET_ID, plan, desired_state)
         return GoldSyncResult(
             dataset_id=POSTGRES_DATASET_ID,
             source_build_id=record.build_id,

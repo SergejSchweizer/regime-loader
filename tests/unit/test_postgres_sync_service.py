@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
 import pytest
 
+import application.postgres_sync_service as sync_service_module
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
 from application.gold_frame import GOLD_COLUMNS, GOLD_SCHEMA_VERSION
 from application.postgres_delta import source_rows_and_digests
@@ -13,7 +15,9 @@ from application.postgres_sync import (
     POSTGRES_DATASET_ID,
     GoldDeltaPlan,
     GoldRowDigest,
+    GoldSyncResult,
     GoldSyncState,
+    GoldSyncTransaction,
     GoldTargetSummary,
 )
 from application.postgres_sync_service import (
@@ -128,16 +132,28 @@ class FakeRepository:
         self.digests = digests
         self.fail_apply = fail_apply
         self.applied: list[tuple[GoldDeltaPlan, GoldSyncState]] = []
+        self.events: list[str] = []
 
     def ensure_schema(self) -> None:
         pass
 
+    def run_locked(
+        self,
+        operation: Callable[[GoldSyncTransaction], GoldSyncResult],
+    ) -> GoldSyncResult:
+        self.events.append("lock")
+        result = operation(self)
+        self.events.append("commit")
+        return result
+
     def read_state(self, dataset_id: str) -> GoldSyncState | None:
         assert dataset_id == POSTGRES_DATASET_ID
+        self.events.append("read target")
         return self.state
 
     def read_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]:
         assert dataset_id == POSTGRES_DATASET_ID
+        self.events.append("read target")
         return self.digests
 
     def apply_delta(
@@ -149,6 +165,7 @@ class FakeRepository:
         assert dataset_id == POSTGRES_DATASET_ID
         if self.fail_apply:
             raise RuntimeError("verification failed")
+        self.events.extend(("mutate", "verify", "state"))
         self.applied.append((plan, state))
         if plan.source_digests:
             self.digests = plan.source_digests
@@ -195,6 +212,36 @@ def test_first_sync_inserts_complete_current_gold() -> None:
     assert state.source_build_id == "20260822T100000Z"
     assert source.hash_paths == [_PATH]
     assert source.read_paths == [_PATH]
+
+
+def test_sync_plans_and_applies_inside_locked_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = _frame((0,))
+    repository = FakeRepository()
+    service, _ = _service(frame, repository)
+    original_plan = sync_service_module.plan_gold_delta
+
+    def traced_plan(
+        source_frame: pl.DataFrame,
+        target_digests: tuple[GoldRowDigest, ...],
+        prior_state: GoldSyncState | None,
+    ) -> GoldDeltaPlan:
+        repository.events.append("plan")
+        return original_plan(source_frame, target_digests, prior_state)
+
+    monkeypatch.setattr(sync_service_module, "plan_gold_delta", traced_plan)
+
+    service.sync()
+
+    assert repository.events == [
+        "lock",
+        "read target",
+        "read target",
+        "plan",
+        "mutate",
+        "verify",
+        "state",
+        "commit",
+    ]
 
 
 def test_same_data_advances_checkpoint_without_gold_or_digest_row_mutations() -> None:

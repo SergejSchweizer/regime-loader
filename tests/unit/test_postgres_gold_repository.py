@@ -12,6 +12,7 @@ from application.postgres_sync import (
     GoldRowDigest,
     GoldRowPayload,
     GoldSyncState,
+    GoldSyncTransaction,
     GoldTargetSummary,
 )
 from ingestion.postgres_gold_repository import (
@@ -303,6 +304,32 @@ def test_apply_delta_is_locked_exact_and_state_is_last_before_commit() -> None:
     assert "TRUNCATE" not in "\n".join(queries)
     assert ("commit", None, None) in connection.events
     assert ("rollback", None, None) not in connection.events
+
+
+def test_locked_transaction_uses_deterministic_namespaced_key_before_reads() -> None:
+    connection = FakeConnection()
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+    expected_key = module._advisory_lock_key(POSTGRES_DATASET_ID)
+
+    def operation(transaction: GoldSyncTransaction) -> None:
+        transaction.read_state(POSTGRES_DATASET_ID)
+
+    repository.run_locked(operation)
+
+    queries = _execute_queries(connection)
+    lock_index = next(i for i, query in enumerate(queries) if "pg_advisory_xact_lock" in query)
+    state_index = next(
+        i for i, query in enumerate(queries) if query.startswith("SELECT dataset_id")
+    )
+    lock_event = next(
+        event
+        for event in connection.events
+        if event[0] == "execute" and "pg_advisory_xact_lock" in str(event[1])
+    )
+    assert lock_index < state_index
+    assert lock_event[2] == (expected_key,)
+    assert expected_key == module._advisory_lock_key(POSTGRES_DATASET_ID)
+    assert "regime-loader" in module.POSTGRES_ADVISORY_LOCK_NAMESPACE
 
 
 def test_first_bootstrap_can_insert_complete_source_without_full_reload_sql() -> None:

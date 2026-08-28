@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from application.postgres_sync import (
     GoldSyncRepository,
     GoldSyncResult,
     GoldSyncState,
+    GoldSyncTransaction,
     GoldTargetSummary,
     select_current_sync_record,
 )
@@ -131,6 +133,9 @@ def test_repository_protocol_can_be_implemented_without_psycopg() -> None:
     class FakeRepository:
         def ensure_schema(self) -> None:
             return None
+
+        def run_locked(self, operation: Callable[[GoldSyncTransaction], object]) -> object:
+            return operation(self)
 
         def read_state(self, dataset_id: str) -> GoldSyncState | None:
             del dataset_id
