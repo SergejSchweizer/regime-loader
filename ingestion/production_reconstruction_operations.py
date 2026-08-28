@@ -55,7 +55,7 @@ class GuardedProductionReconstructionOperations:
     def disable_scheduling(self) -> None:
         marker = self.project_root / _MAINTENANCE_MARKER
         marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch(exist_ok=False)
+        marker.touch(exist_ok=True)
 
     def acquire_locks(self) -> None:
         lock_path = self.project_root / _RUNNER_LOCK

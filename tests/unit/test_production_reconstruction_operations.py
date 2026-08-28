@@ -128,6 +128,17 @@ def test_endpoint_preflight_requires_held_maintenance_lock(tmp_path: Path) -> No
         _operations(tmp_path).preflight_endpoint()
 
 
+def test_maintenance_marker_is_idempotent_for_explicit_reconstruction_retries(
+    tmp_path: Path,
+) -> None:
+    operations = _operations(tmp_path)
+
+    operations.disable_scheduling()
+    operations.disable_scheduling()
+
+    assert (operations.project_root / ".maintenance/regime-loader-reconstruction").is_file()
+
+
 def test_backup_snapshots_full_lake_and_private_database_dump(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
