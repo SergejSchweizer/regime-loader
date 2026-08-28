@@ -11,6 +11,8 @@ CLI="$PROJECT_ROOT/.venv/bin/regime-loader"
 export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 LOG_DIR="$PROJECT_ROOT/.logs"
 LOG_PATH="$LOG_DIR/regime-loader.log"
+LOCK_DIR="$PROJECT_ROOT/.locks"
+LOCK_PATH="$LOCK_DIR/regime-loader-sunday.lock"
 
 if ! REGIME_LOADER_GIT_SHA=$(git -C "$PROJECT_ROOT" rev-parse --verify HEAD); then
 	printf 'Unable to resolve repository Git identity\n' >&2
@@ -19,6 +21,12 @@ fi
 export REGIME_LOADER_GIT_SHA
 
 mkdir -p "$LOG_DIR"
+mkdir -p "$LOCK_DIR"
+exec 9>"$LOCK_PATH"
+if ! flock -n 9; then
+	printf 'Sunday regime-loader job is already running\n' >&2
+	exit 3
+fi
 exec >>"$LOG_PATH" 2>&1
 
 printf '\n[%s] Starting Sunday regime-loader job\n' "$(date --iso-8601=seconds)"
