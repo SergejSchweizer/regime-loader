@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
-from typing import Protocol, TypeVar, cast
+from typing import NoReturn, Protocol, TypeVar, cast
 
 import psycopg
 
@@ -34,10 +34,42 @@ POSTGRES_USER = "regime-loader"
 POSTGRES_ADVISORY_LOCK_NAMESPACE = "regime-loader:postgres-gold-sync:v1"
 
 TransactionResult = TypeVar("TransactionResult")
+POSTGRES_APPLICATION_NAME = "regime-loader"
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresTimeoutPolicy:
+    """Bounded waits for every PostgreSQL session opened by this adapter."""
+
+    connect_timeout_seconds: int = 5
+    lock_timeout_ms: int = 5_000
+    statement_timeout_ms: int = 30_000
+    idle_in_transaction_timeout_ms: int = 30_000
+    application_name: str = POSTGRES_APPLICATION_NAME
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("connect_timeout_seconds", self.connect_timeout_seconds),
+            ("lock_timeout_ms", self.lock_timeout_ms),
+            ("statement_timeout_ms", self.statement_timeout_ms),
+            ("idle_in_transaction_timeout_ms", self.idle_in_transaction_timeout_ms),
+        ):
+            if value <= 0:
+                raise ValueError(f"PostgreSQL {name} must be positive")
+        if self.application_name != POSTGRES_APPLICATION_NAME:
+            raise ValueError(f"PostgreSQL application_name must be {POSTGRES_APPLICATION_NAME}")
 
 
 class PostgresGoldRepositoryError(RuntimeError):
     """Sanitized repository error that deliberately carries no connection secret."""
+
+
+class PostgresOperationTimeoutError(PostgresGoldRepositoryError):
+    """A bounded PostgreSQL operation exceeded its configured wait."""
+
+
+class PostgresLockContentionError(PostgresOperationTimeoutError):
+    """The PostgreSQL advisory lock was unavailable before its configured deadline."""
 
 
 class CursorPort(Protocol):
@@ -67,6 +99,7 @@ class PostgresSyncConfig:
     user: str
     database: str
     password: str = field(repr=False)
+    timeout_policy: PostgresTimeoutPolicy = field(default_factory=PostgresTimeoutPolicy)
 
     def __post_init__(self) -> None:
         if self.host != POSTGRES_HOST:
@@ -109,6 +142,8 @@ def _default_connection(config: PostgresSyncConfig) -> ConnectionPort:
         user=config.user,
         dbname=config.database,
         password=config.password,
+        connect_timeout=config.timeout_policy.connect_timeout_seconds,
+        application_name=config.timeout_policy.application_name,
         autocommit=False,
     )
     return cast(ConnectionPort, connection)
@@ -183,6 +218,25 @@ ON CONFLICT (dataset_id) DO UPDATE SET
     min_timestamp = EXCLUDED.min_timestamp,
     max_timestamp = EXCLUDED.max_timestamp,
     synced_at_utc = EXCLUDED.synced_at_utc"""
+
+
+def _session_configuration(policy: PostgresTimeoutPolicy) -> tuple[str, ...]:
+    return (
+        f"SET application_name = '{policy.application_name}'",
+        f"SET TIME ZONE '{POSTGRES_SESSION_TIMEZONE}'",
+        f"SET lock_timeout = '{policy.lock_timeout_ms}ms'",
+        f"SET statement_timeout = '{policy.statement_timeout_ms}ms'",
+        f"SET idle_in_transaction_session_timeout = '{policy.idle_in_transaction_timeout_ms}ms'",
+    )
+
+
+def _raise_sanitized_error(operation: str, error: Exception) -> NoReturn:
+    sqlstate = getattr(error, "sqlstate", None)
+    if sqlstate == "55P03":
+        raise PostgresLockContentionError("PostgreSQL advisory lock wait timed out") from None
+    if sqlstate == "57014":
+        raise PostgresOperationTimeoutError(f"PostgreSQL {operation} timed out") from None
+    raise PostgresGoldRepositoryError(f"PostgreSQL {operation} failed") from None
 
 
 def _as_text(value: object, name: str) -> str:
@@ -343,18 +397,20 @@ class PostgresGoldSyncRepository:
         self._connection_factory = connection_factory
 
     def _open(self) -> ConnectionPort:
+        connection: ConnectionPort | None = None
         try:
             connection = self._connection_factory(self._config)
             cursor = connection.cursor()
             try:
-                cursor.execute(f"SET TIME ZONE '{POSTGRES_SESSION_TIMEZONE}'")
+                for statement in _session_configuration(self._config.timeout_policy):
+                    cursor.execute(statement)
             finally:
                 cursor.close()
             return connection
-        except Exception:
-            raise PostgresGoldRepositoryError(
-                "PostgreSQL connection initialization failed"
-            ) from None
+        except Exception as exc:
+            if connection is not None:
+                connection.close()
+            _raise_sanitized_error("connection initialization", exc)
 
     def ensure_schema(self) -> None:
         connection = self._open()
@@ -369,11 +425,12 @@ class PostgresGoldSyncRepository:
             finally:
                 cursor.close()
             connection.commit()
-        except Exception:
+        except PostgresGoldRepositoryError:
             connection.rollback()
-            raise PostgresGoldRepositoryError(
-                "PostgreSQL Gold schema initialization failed"
-            ) from None
+            raise
+        except Exception as exc:
+            connection.rollback()
+            _raise_sanitized_error("Gold schema initialization", exc)
         finally:
             connection.close()
 
@@ -416,8 +473,10 @@ class PostgresGoldSyncRepository:
             finally:
                 cursor.close()
             return None if row is None else _state_from_row(row)
-        except Exception:
-            raise PostgresGoldRepositoryError("PostgreSQL Gold sync-state read failed") from None
+        except PostgresGoldRepositoryError:
+            raise
+        except Exception as exc:
+            _raise_sanitized_error("Gold sync-state read", exc)
         finally:
             connection.close()
 
@@ -444,8 +503,10 @@ class PostgresGoldSyncRepository:
                     raise ValueError("PostgreSQL Gold digest timestamp cannot be null")
                 result.append(GoldRowDigest(timestamp, _as_text(row[1], "row_sha256")))
             return tuple(result)
-        except Exception:
-            raise PostgresGoldRepositoryError("PostgreSQL Gold digest read failed") from None
+        except PostgresGoldRepositoryError:
+            raise
+        except Exception as exc:
+            _raise_sanitized_error("Gold digest read", exc)
         finally:
             connection.close()
 
@@ -462,8 +523,10 @@ class PostgresGoldSyncRepository:
             if row is None:
                 raise ValueError("PostgreSQL Gold summary query returned no row")
             return _summary_from_row(row)
-        except Exception:
-            raise PostgresGoldRepositoryError("PostgreSQL Gold summary read failed") from None
+        except PostgresGoldRepositoryError:
+            raise
+        except Exception as exc:
+            _raise_sanitized_error("Gold summary read", exc)
         finally:
             connection.close()
 
@@ -519,9 +582,12 @@ class PostgresGoldSyncRepository:
             finally:
                 cursor.close()
             connection.commit()
-        except Exception:
+        except PostgresGoldRepositoryError:
             connection.rollback()
-            raise PostgresGoldRepositoryError("PostgreSQL Gold delta transaction failed") from None
+            raise
+        except Exception as exc:
+            connection.rollback()
+            _raise_sanitized_error("Gold delta transaction", exc)
         finally:
             connection.close()
 

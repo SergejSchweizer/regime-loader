@@ -21,7 +21,9 @@ from ingestion.postgres_gold_repository import (
     POSTGRES_USER,
     PostgresGoldRepositoryError,
     PostgresGoldSyncRepository,
+    PostgresLockContentionError,
     PostgresSyncConfig,
+    PostgresTimeoutPolicy,
 )
 
 
@@ -155,14 +157,54 @@ def test_config_requires_exact_endpoint_role_and_hides_password() -> None:
         PostgresSyncConfig.from_mapping({"PGPORT": "invalid"})
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("connect_timeout_seconds", 0),
+        ("lock_timeout_ms", 0),
+        ("statement_timeout_ms", -1),
+        ("idle_in_transaction_timeout_ms", 0),
+    ],
+)
+def test_timeout_policy_rejects_non_positive_bounds(field: str, value: int) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        PostgresTimeoutPolicy(**{field: value})
+
+
+def test_default_connection_passes_connect_timeout_and_application_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def connect(**kwargs: object) -> FakeConnection:
+        captured.update(kwargs)
+        return FakeConnection()
+
+    monkeypatch.setattr(module.psycopg, "connect", connect)
+    policy = PostgresTimeoutPolicy(connect_timeout_seconds=9)
+    module._default_connection(
+        PostgresSyncConfig(
+            POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, "quant_data", "secret", policy
+        )
+    )
+    assert captured["connect_timeout"] == 9
+    assert captured["application_name"] == "regime-loader"
+
+
 def test_schema_ddl_is_gold_only_timestamptz_and_idempotent() -> None:
     connection = FakeConnection()
     factory = Factory(connection)
     repository = PostgresGoldSyncRepository(_config(), connection_factory=factory)
     repository.ensure_schema()
     queries = _execute_queries(connection)
-    assert queries[0] == "SET TIME ZONE 'UTC'"
-    ddl = "\n".join(queries[1:])
+    assert queries[:5] == [
+        "SET application_name = 'regime-loader'",
+        "SET TIME ZONE 'UTC'",
+        "SET lock_timeout = '5000ms'",
+        "SET statement_timeout = '30000ms'",
+        "SET idle_in_transaction_session_timeout = '30000ms'",
+    ]
+    ddl = "\n".join(queries[5:])
     assert '"timestamp_m1" TIMESTAMPTZ(6) NOT NULL PRIMARY KEY' in ddl
     for column in GOLD_COLUMNS[1:]:
         assert f'"{column}" DOUBLE PRECISION NULL' in ddl
@@ -367,6 +409,51 @@ def test_transaction_failure_rolls_back_and_error_is_sanitized() -> None:
     assert "repo-secret" not in str(exc_info.value)
     assert ("rollback", None, None) in connection.events
     assert ("commit", None, None) not in connection.events
+
+
+def test_lock_timeout_is_typed_sanitized_and_rolls_back() -> None:
+    class LockTimeoutError(RuntimeError):
+        sqlstate = "55P03"
+
+    class LockTimeoutCursor(FakeCursor):
+        def execute(self, query: str, params: object = None) -> object:
+            if "pg_advisory_xact_lock" in query:
+                raise LockTimeoutError("postgresql://secret@host")
+            return super().execute(query, params)
+
+    class LockTimeoutConnection(FakeConnection):
+        def cursor(self) -> LockTimeoutCursor:
+            return LockTimeoutCursor(self)
+
+    connection = LockTimeoutConnection(summary_row=(0, None, None))
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+    with pytest.raises(PostgresLockContentionError) as exc_info:
+        repository.apply_delta(
+            POSTGRES_DATASET_ID, GoldDeltaPlan((), (), (), (), ()), _state(count=0)
+        )
+    assert "secret" not in str(exc_info.value)
+    assert ("rollback", None, None) in connection.events
+
+
+def test_statement_timeout_is_typed_and_sanitized() -> None:
+    class StatementTimeoutError(RuntimeError):
+        sqlstate = "57014"
+
+    class StatementTimeoutCursor(FakeCursor):
+        def execute(self, query: str, params: object = None) -> object:
+            if query.startswith("SELECT COUNT"):
+                raise StatementTimeoutError("postgresql://secret@host")
+            return super().execute(query, params)
+
+    class StatementTimeoutConnection(FakeConnection):
+        def cursor(self) -> StatementTimeoutCursor:
+            return StatementTimeoutCursor(self)
+
+    connection = StatementTimeoutConnection()
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+    with pytest.raises(module.PostgresOperationTimeoutError) as exc_info:
+        repository.summary(POSTGRES_DATASET_ID)
+    assert "secret" not in str(exc_info.value)
 
 
 def test_post_write_verification_failure_rolls_back_before_state_write() -> None:

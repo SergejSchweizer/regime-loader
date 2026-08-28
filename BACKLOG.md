@@ -2110,11 +2110,11 @@ Acceptance:
 ## PR-58: Bound PostgreSQL Connection, Lock, And Statement Waits
 
 PR name: `postgres-timeout-policy`
-Status: Planned
-Updated: 2026-08-24
+Status: In Progress
+Updated: 2026-08-28
 PR: TBD
 Git branch: `pr-58/postgres-timeout-policy`
-Git status: `not-started (branch absent)`
+Git status: `active-clean`
 Agent lane: PostgreSQL resilience; one weak agent
 Depends on: PR-43, PR-53
 Commit: `fix(pr-58): bound postgres operation waits`
