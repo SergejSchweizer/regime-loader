@@ -134,11 +134,7 @@ def test_ohlc_market_bar_invariants_are_rejected(bar: str, message: str) -> None
 
 
 def test_invalid_source_bars_are_excluded_without_fabricating_replacements() -> None:
-    payload = (
-        b"DATE,OPEN,HIGH,LOW,CLOSE\n"
-        b"08/18/2026,20,21,19,20.5\n"
-        b"08/19/2026,20,19,18,20\n"
-    )
+    payload = b"DATE,OPEN,HIGH,LOW,CLOSE\n08/18/2026,20,21,19,20.5\n08/19/2026,20,19,18,20\n"
     provider = CboeProvider(FakeTransport(HttpResponse(200, payload, {})), clock=lambda: NOW)
 
     frame = provider.fetch(series_contract("vix"), update_request())
