@@ -49,6 +49,14 @@ def payload_with_all_null_bar(days: list[date]) -> bytes:
     return json.dumps(document).encode()
 
 
+def payload_with_bar(day: date, bar: tuple[float, float, float, float]) -> bytes:
+    document = json.loads(payload([day]))
+    quote = document["chart"]["result"][0]["indicators"]["quote"][0]
+    for name, value in zip(("open", "high", "low", "close"), bar, strict=True):
+        quote[name][0] = value
+    return json.dumps(document).encode()
+
+
 class FakeTransport:
     def __init__(self, response: HttpResponse) -> None:
         self.response = response
@@ -150,6 +158,29 @@ def test_out_of_window_bounded_row_is_contract_failure() -> None:
 def test_invalid_payloads_are_rejected(content: bytes, error: str) -> None:
     provider = YahooMoveProvider(FakeTransport(HttpResponse(200, content, {})), clock=lambda: NOW)
     with pytest.raises(ValueError, match=error):
+        provider.fetch(series_contract("move"), update_request())
+
+
+@pytest.mark.parametrize(
+    "bar, message",
+    [
+        ((-1, 2, 0, 1), "non-negative"),
+        ((2, 1, 0, 1), "high is below open"),
+        ((1, 1, 0, 2), "high is below open"),
+        ((1, 4, 2, 3), "low is above open"),
+        ((3, 4, 2, 1), "low is above open"),
+        ((1, 1, 2, 1), "high is below low"),
+    ],
+)
+def test_ohlc_market_bar_invariants_are_rejected(
+    bar: tuple[float, float, float, float], message: str
+) -> None:
+    provider = YahooMoveProvider(
+        FakeTransport(HttpResponse(200, payload_with_bar(END, bar), {})),
+        clock=lambda: NOW,
+    )
+
+    with pytest.raises(ValueError, match=message):
         provider.fetch(series_contract("move"), update_request())
 
 

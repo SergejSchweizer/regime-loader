@@ -114,6 +114,25 @@ def test_invalid_payloads_are_rejected(payload: bytes, message: str) -> None:
         provider.fetch(series_contract("vix"), update_request())
 
 
+@pytest.mark.parametrize(
+    "bar, message",
+    [
+        ("-1,2,0,1", "non-negative"),
+        ("2,1,0,1", "high is below open"),
+        ("1,1,0,2", "high is below open"),
+        ("1,4,2,3", "low is above open"),
+        ("3,4,2,1", "low is above open"),
+        ("1,1,2,1", "high is below low"),
+    ],
+)
+def test_ohlc_market_bar_invariants_are_rejected(bar: str, message: str) -> None:
+    payload = f"DATE,OPEN,HIGH,LOW,CLOSE\n08/19/2026,{bar}\n".encode()
+    provider = CboeProvider(FakeTransport(HttpResponse(200, payload, {})), clock=lambda: NOW)
+
+    with pytest.raises(ValueError, match=message):
+        provider.fetch(series_contract("vix"), update_request())
+
+
 def test_source_unavailable_is_typed_and_safe() -> None:
     provider = CboeProvider(FakeTransport(HttpResponse(404, b"missing", {})), clock=lambda: NOW)
     with pytest.raises(ProviderHttpError) as captured:
