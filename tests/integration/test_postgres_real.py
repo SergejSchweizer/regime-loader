@@ -74,7 +74,20 @@ def _state(timestamp: datetime) -> GoldSyncState:
 def test_real_postgres_schema_utc_transaction_lock_and_round_trip(
     repository: PostgresGoldSyncRepository, postgres_dsn: str
 ) -> None:
+    with psycopg.connect(postgres_dsn, autocommit=True) as connection:
+        connection.execute(
+            "CREATE TABLE regime_loader.gold_regime_features "
+            "(timestamp_m1 TIMESTAMPTZ(6) PRIMARY KEY)"
+        )
     repository.ensure_schema()
+    repository.ensure_schema()
+    with psycopg.connect(postgres_dsn) as connection:
+        columns = connection.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'regime_loader' AND table_name = 'gold_regime_features'"
+        ).fetchall()
+    assert {column[0] for column in columns} == set(GOLD_COLUMNS)
+
     timestamp = _timestamp(20)
     row = GoldRowPayload(timestamp, tuple(1.0 for _ in GOLD_COLUMNS[1:]))
     digest = GoldRowDigest(timestamp, "b" * 64)
