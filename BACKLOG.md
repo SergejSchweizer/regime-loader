@@ -2257,6 +2257,27 @@ Acceptance:
 - A2 (verifies R2): `TEST_WORKERS=1` provides deterministic serial fallback and a higher value is accepted by the Make targets.
 - A3 (verifies R3): `make quality-gate` still runs lint, type, unit, integration, and the unchanged combined coverage threshold.
 
+## PR-64: Deduplicate Pull Request Quality-Gate Triggers
+
+PR name: `deduplicate-pr-ci-triggers`
+Status: In Progress
+Updated: 2026-08-28
+PR: none
+Git branch: `pr-64/deduplicate-pr-ci-triggers`
+Git status: `active-clean`
+Agent lane: CI infrastructure; one agent only
+Depends on: PR-40
+Commit: `ci(pr-64): deduplicate pull request test runs`
+Design patterns: Configuration Policy, Command.
+
+Description:
+- R1: Run required quality gates once per pull request revision through `pull_request`, while preserving a `push` run for the protected `main` branch and the required merge-queue run.
+- R2: Retain the exact required `lint`, `type`, `unit`, `integration`, and combined `coverage` jobs and their artifact handoff.
+
+Acceptance:
+- A1 (verifies R1): a non-main PR-branch push cannot trigger a duplicate `push` workflow alongside its `pull_request` workflow.
+- A2 (verifies R2): main pushes and merge-queue revisions retain all required quality gates without rerunning either test suite inside `coverage`.
+
 ### Corrected Production Completion Gate
 
 The repository's earlier MVP and PR-31..PR-39 completion statements describe historical implementation milestones only. Production serving correctness is not certified until PR-41 through PR-60 are merged and PR-61 has completed the authoritative source reconcile, certified Gold rebuild, loader-owned PostgreSQL reconstruction, independent real-target verification, and zero-mutation replay with a sanitized `PASS` report. Until then, no existing PostgreSQL data should be treated as independently verified merely because unit/fake-adapter tests or count/min/max checks pass.
