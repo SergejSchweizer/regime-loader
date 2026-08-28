@@ -16,13 +16,13 @@ VOLATILITY_SERIES = ("vix", "vix9d", "vix3m", "vix6m", "vix1y", "vstoxx", "move"
 class VolatilityFeaturePolicy:
     """Source-controlled observation-lag and rolling-window policy."""
 
-    delta_lags: tuple[int, int] = (5, 20)
+    delta_lags: tuple[int, int, int] = (1, 5, 20)
     zscore_window: int = 60
     zscore_ddof: int = 0
 
     def __post_init__(self) -> None:
-        if self.delta_lags != (5, 20):
-            raise ValueError("volatility delta lags are fixed at 5 and 20 observations")
+        if self.delta_lags != (1, 5, 20):
+            raise ValueError("volatility delta lags are fixed at 1, 5, and 20 observations")
         if self.zscore_window != 60 or self.zscore_ddof != 0:
             raise ValueError("volatility z-score policy is fixed at window=60 and ddof=0")
 
@@ -67,6 +67,7 @@ def _series_features(
     std = f"__{series_id}_std60"
     return (
         frame.with_columns(
+            (pl.col(level) - pl.col(level).shift(1)).alias(f"{series_id}_delta_1obs"),
             (pl.col(level) - pl.col(level).shift(5)).alias(f"{series_id}_delta_5obs"),
             (pl.col(level) - pl.col(level).shift(20)).alias(f"{series_id}_delta_20obs"),
             pl.col(level)

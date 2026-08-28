@@ -142,6 +142,12 @@ class GoldPostgresDeltaSync:
         if prior is None:
             return
         if (
+            prior.schema_version == 1
+            and desired.schema_version == 2
+            and prior.feature_version == desired.feature_version
+        ):
+            return
+        if (
             prior.schema_version != desired.schema_version
             or prior.feature_version != desired.feature_version
         ):

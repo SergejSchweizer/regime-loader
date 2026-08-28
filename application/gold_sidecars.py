@@ -21,7 +21,7 @@ GOLD_FORMULA_PARAMETERS: dict[str, object] = {
     "cross_series_alignment": "same timestamp only",
     "missing_data_policy": "no fill interpolation centered window or asof carry",
     "observation_delta_semantics": "source-unit absolute difference over valid observations",
-    "volatility_delta_observations": [5, 20],
+    "observation_delta_observations": [1, 5, 20],
     "volatility_zscore": {"ddof": 0, "window_observations": 60},
 }
 

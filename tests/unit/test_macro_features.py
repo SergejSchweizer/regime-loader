@@ -43,6 +43,9 @@ def test_exact_macro_columns_and_observation_lags() -> None:
     result = build_macro_features(_all_linear())
     assert result.schema["timestamp_m1"] == pl.Datetime("us", "UTC")
     assert result.get_column("timestamp_m1")[0] == datetime(2026, 1, 1, tzinfo=UTC)
+    for series_id in MACRO_SERIES:
+        assert result.get_column(f"{series_id}_delta_1obs")[0] is None
+        assert result.get_column(f"{series_id}_delta_1obs")[1] == pytest.approx(1.0)
     for series_id in ("ciss", "euro_hy_oas"):
         assert result.get_column(f"{series_id}_delta_5obs")[:5].null_count() == 5
         assert result.get_column(f"{series_id}_delta_5obs")[5] == pytest.approx(5.0)
@@ -100,7 +103,7 @@ def test_contract_validation_and_policy_are_fail_closed() -> None:
     frames["ciss"] = frames["ciss"].with_columns(pl.lit("wrong").alias("series_id"))
     with pytest.raises(ValueError, match="identity mismatch"):
         build_macro_features(frames)
-    with pytest.raises(ValueError, match="fixed at 5 and 20"):
+    with pytest.raises(ValueError, match="fixed at 1, 5, and 20"):
         MacroFeaturePolicy(short_lag=4)
 
 

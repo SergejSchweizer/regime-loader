@@ -214,7 +214,7 @@ delta_Nobs(t) = x(t) - x(previous Nth valid observation)
 ### Gold semantic versions
 
 ```text
-schema_version  = 1
+schema_version  = 2
 feature_version = 1
 ```
 
@@ -2210,6 +2210,29 @@ Acceptance:
 - A6 (verifies R6): PR-60 produces `PASS`, including role/schema/data/temporal checks and zero symmetric differences.
 - A7 (verifies R7): immediate unchanged replay has exactly zero semantic mutations and corrected scheduled-wrapper behavior is proven without a second destructive/bootstrap path.
 - A8 (verifies R8): the committed report contains no credentials/raw provider payloads, is `PASS`, and scheduling remains disabled on any failed assertion.
+
+## PR-62: Add One-Observation Deltas To Every Source Feature
+
+PR name: `gold-one-observation-deltas`
+Status: In Progress
+Updated: 2026-08-27
+PR: TBD
+Git branch: `pr-62/delta-one-observation-features`
+Git status: `active-clean`
+Agent lane: Gold/PostgreSQL feature delivery; one agent only
+Depends on: PR-40
+Commit: `feat(pr-62): add one-observation feature deltas`
+Design patterns: Strategy, Adapter, Repository, Versioned Migration.
+
+Description:
+- R1: Add a causal `delta_1obs` feature for each of the 13 canonical source levels, calculated as the current valid observation minus the immediately preceding valid observation without calendar filling.
+- R2: Add the 13 `delta_1obs` columns to canonical Gold in deterministic feature-family order, increment `schema_version` to 2, and include the one-observation horizon in build formula metadata and documentation.
+- R3: Migrate the PostgreSQL consumer table idempotently with nullable `DOUBLE PRECISION` `delta_1obs` columns, permit only the explicit schema 1-to-2 delta-sync transition, and synchronize the new current Gold build.
+
+Acceptance:
+- A1 (verifies R1): focused volatility and macro feature tests prove the first value is null, the next valid observation has the exact one-observation difference, and all 13 source series expose the feature.
+- A2 (verifies R2): Gold schema/order, sidecar formula hash, semantic-version, unit, and offline integration tests prove the new immutable schema contract.
+- A3 (verifies R3): repository tests prove idempotent additive DDL and fail-closed incompatible versions; a live delta sync verifies all 13 columns exist and are populated from the schema-2 current build.
 
 ### Corrected Production Completion Gate
 

@@ -48,6 +48,8 @@ def test_observation_lags_and_population_zscore_use_valid_rows_not_calendar_days
     assert result.height == 61
     assert result.schema["timestamp_m1"] == pl.Datetime("us", "UTC")
     assert result.get_column("timestamp_m1")[0] == datetime(2026, 1, 1, tzinfo=UTC)
+    assert result.get_column("vix_delta_1obs")[0] is None
+    assert result.get_column("vix_delta_1obs")[1] == pytest.approx(1.0)
     assert result.get_column("vix_delta_5obs")[:5].null_count() == 5
     assert result.get_column("vix_delta_5obs")[5] == pytest.approx(5.0)
     assert result.get_column("vix_delta_20obs")[:20].null_count() == 20
@@ -106,7 +108,7 @@ def test_contract_validation_and_policy_are_fail_closed() -> None:
     frames["vix"] = frames["vix"].with_columns(pl.lit("wrong").alias("series_id"))
     with pytest.raises(ValueError, match="identity mismatch"):
         build_volatility_features(frames)
-    with pytest.raises(ValueError, match="fixed at 5 and 20"):
+    with pytest.raises(ValueError, match="fixed at 1, 5, and 20"):
         VolatilityFeaturePolicy(delta_lags=(4, 20))
     with pytest.raises(ValueError, match="window=60"):
         VolatilityFeaturePolicy(zscore_window=20)

@@ -165,6 +165,7 @@ def test_schema_ddl_is_gold_only_timestamptz_and_idempotent() -> None:
     assert '"timestamp_m1" TIMESTAMPTZ(6) NOT NULL PRIMARY KEY' in ddl
     for column in GOLD_COLUMNS[1:]:
         assert f'"{column}" DOUBLE PRECISION NULL' in ddl
+        assert f'ADD COLUMN IF NOT EXISTS "{column}" DOUBLE PRECISION NULL' in ddl
     assert '"regime_loader"."regime_features_daily"' in ddl
     assert '"regime_loader_sync"."gold_sync_state"' in ddl
     assert '"regime_loader_sync"."gold_row_hashes"' in ddl

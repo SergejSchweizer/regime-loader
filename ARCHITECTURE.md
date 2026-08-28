@@ -392,6 +392,9 @@ For a single series:
 delta_Nobs(t) = x(t) - x(previous Nth valid observation)
 ```
 
+Every source level has a causal `delta_1obs` feature. Existing 5- and 20-observation
+deltas remain series-specific as declared by the feature family.
+
 A 60-observation z-score uses the last 60 valid observations including `t` and population standard deviation (`ddof=0`). It is null before 60 observations or when standard deviation is zero.
 
 Cross-series ratios/spreads require same `timestamp_m1` values.
@@ -412,7 +415,7 @@ Before final Gold validation, feature NaN is normalized to null. Infinity is rej
 Initial constants:
 
 ```text
-schema_version  = 1
+schema_version  = 2
 feature_version = 1
 ```
 
