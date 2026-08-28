@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -73,6 +73,21 @@ def test_timestamp_contract_is_timestamptz_microseconds_utc() -> None:
     assert POSTGRES_TIMESTAMP_COLUMN == "timestamp_m1"
     assert POSTGRES_TIMESTAMP_SQL_TYPE == "TIMESTAMPTZ(6)"
     assert POSTGRES_SESSION_TIMEZONE == "UTC"
+
+
+def test_postgres_sync_timestamps_require_zero_offset_utc() -> None:
+    utc_timestamp = _now(1)
+    payload = GoldRowPayload(utc_timestamp, tuple(None for _ in GOLD_COLUMNS[1:]))
+    assert payload.timestamp_m1 is utc_timestamp
+
+    for invalid_timestamp in (
+        datetime(2026, 8, 1),
+        datetime(2026, 8, 1, tzinfo=timezone(timedelta(hours=1))),
+        datetime(2026, 8, 1, tzinfo=timezone(timedelta(hours=2))),
+        datetime(2026, 8, 1, tzinfo=timezone(timedelta(hours=-5))),
+    ):
+        with pytest.raises(ValueError, match="zero-offset UTC"):
+            GoldRowPayload(invalid_timestamp, tuple(None for _ in GOLD_COLUMNS[1:]))
 
 
 def test_contract_value_objects_and_counts() -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timedelta
 from typing import Protocol
 
 from application.gold_catalog import (
@@ -26,9 +26,9 @@ POSTGRES_SESSION_TIMEZONE = "UTC"
 
 
 def _utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        raise ValueError("PostgreSQL Gold sync timestamps must be timezone-aware")
-    return value.astimezone(UTC)
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ValueError("PostgreSQL Gold sync timestamps must be zero-offset UTC")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
