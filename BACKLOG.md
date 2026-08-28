@@ -1836,7 +1836,7 @@ Status: In Progress
 Updated: 2026-08-28
 PR: none
 Git branch: `pr-46/scheduler-timezone-contract`
-Git status: `pushed-ci-failing`
+Git status: `pushed-ci-green`
 Agent lane: Scheduler semantics; one weak agent
 Depends on: PR-45
 Commit: `fix(pr-46): freeze scheduler timezone contract`
