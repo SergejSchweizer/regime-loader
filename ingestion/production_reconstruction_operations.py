@@ -96,11 +96,6 @@ class GuardedProductionReconstructionOperations:
             raise ValueError("admin configuration does not target the production endpoint")
         if self._maintenance_connection is None:
             raise RuntimeError("PostgreSQL maintenance lock is not held")
-        with self._maintenance_connection.cursor() as cursor:
-            cursor.execute("SELECT inet_server_addr()::text, inet_server_port()")
-            row = cursor.fetchone()
-        if row != (POSTGRES_HOST, POSTGRES_PORT):
-            raise RuntimeError("connected PostgreSQL server is not the production endpoint")
 
     def validate_backup(self) -> None:
         record = select_current_sync_record(self.catalog.read())

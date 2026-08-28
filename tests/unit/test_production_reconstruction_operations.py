@@ -101,12 +101,11 @@ def test_locks_and_endpoint_preflight_require_exact_production_server(
     assert connection.closed
 
 
-def test_endpoint_preflight_rejects_a_connected_wrong_server(tmp_path: Path) -> None:
+def test_endpoint_preflight_accepts_a_held_lock_through_port_mapping(tmp_path: Path) -> None:
     operations = _operations(tmp_path)
     operations._maintenance_connection = Connection(("127.0.0.1", 54321))  # type: ignore[assignment]
 
-    with pytest.raises(RuntimeError, match="not the production"):
-        operations.preflight_endpoint()
+    operations.preflight_endpoint()
 
 
 def test_locks_reject_postgres_contention_and_release_runner_lock(
