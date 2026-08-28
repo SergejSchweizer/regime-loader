@@ -11,6 +11,8 @@ import pytest
 import ingestion.postgres_gold_repository as postgres_module
 from application.gold_frame import GOLD_COLUMNS
 from application.postgres_sync import (
+    POSTGRES_CONSUMER_SCHEMA,
+    POSTGRES_CONSUMER_TABLE,
     POSTGRES_DATASET_ID,
     GoldDeltaPlan,
     GoldRowDigest,
@@ -76,7 +78,7 @@ def test_real_postgres_schema_utc_transaction_lock_and_round_trip(
 ) -> None:
     with psycopg.connect(postgres_dsn, autocommit=True) as connection:
         connection.execute(
-            "CREATE TABLE regime_loader.gold_regime_features "
+            f"CREATE TABLE {POSTGRES_CONSUMER_SCHEMA}.{POSTGRES_CONSUMER_TABLE} "
             "(timestamp_m1 TIMESTAMPTZ(6) PRIMARY KEY)"
         )
     repository.ensure_schema()
@@ -84,7 +86,8 @@ def test_real_postgres_schema_utc_transaction_lock_and_round_trip(
     with psycopg.connect(postgres_dsn) as connection:
         columns = connection.execute(
             "SELECT column_name FROM information_schema.columns "
-            "WHERE table_schema = 'regime_loader' AND table_name = 'gold_regime_features'"
+            "WHERE table_schema = %s AND table_name = %s",
+            (POSTGRES_CONSUMER_SCHEMA, POSTGRES_CONSUMER_TABLE),
         ).fetchall()
     assert {column[0] for column in columns} == set(GOLD_COLUMNS)
 
