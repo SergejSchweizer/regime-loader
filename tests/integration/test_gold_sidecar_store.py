@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
 import pytest
 
-from application.gold_frame import GOLD_COLUMNS
+from application.gold_frame import GOLD_COLUMNS, GOLD_SOURCE_SERIES, SilverInputSignature
 from application.gold_sidecars import GoldSidecarBuilder
 from application.paths import LakePaths
 from ingestion.gold_build_store import GoldBuildStore
@@ -33,6 +33,13 @@ def _frame() -> pl.DataFrame:
     )
 
 
+def _inputs() -> tuple[SilverInputSignature, ...]:
+    return tuple(
+        SilverInputSignature(series_id, 3, date(2026, 8, 19), date(2026, 8, 21), f"{index:064x}")
+        for index, series_id in enumerate(GOLD_SOURCE_SERIES)
+    )
+
+
 def _stores(tmp_path: Path, fault=None) -> tuple[LakePaths, GoldBuildStore, GoldSidecarStore]:
     paths = LakePaths(tmp_path / "lake")
     build_store = GoldBuildStore(paths)
@@ -54,6 +61,7 @@ def test_sidecar_bundle_is_creation_only_valid_and_deterministic(tmp_path: Path)
         first,
         started_at_utc=START,
         completed_at_utc=START + timedelta(minutes=1),
+        inputs=_inputs(),
     )
     assert first_sidecars.manifest_path == paths.gold_build_manifest(first.build_id)
     assert first_sidecars.plot_path == paths.gold_build_profile(first.build_id)
@@ -78,6 +86,7 @@ def test_sidecar_bundle_is_creation_only_valid_and_deterministic(tmp_path: Path)
             first,
             started_at_utc=START,
             completed_at_utc=START + timedelta(minutes=1),
+            inputs=_inputs(),
         )
     assert first_sidecars.manifest_path.read_bytes() == manifest_before
     assert first_sidecars.plot_path.read_bytes() == plot_before
@@ -87,6 +96,7 @@ def test_sidecar_bundle_is_creation_only_valid_and_deterministic(tmp_path: Path)
         second,
         started_at_utc=START,
         completed_at_utc=START + timedelta(minutes=1),
+        inputs=_inputs(),
     )
     assert second_sidecars.plot_path.read_bytes() == plot_before
 
@@ -100,6 +110,7 @@ def test_bundle_validation_rejects_data_manifest_and_png_mismatch(tmp_path: Path
         artifact,
         started_at_utc=START,
         completed_at_utc=START + timedelta(minutes=1),
+        inputs=_inputs(),
     )
 
     with pytest.raises(ValueError, match="row count"):
@@ -143,6 +154,7 @@ def test_sidecar_failure_leaves_incomplete_attempt_and_root_views_untouched(
             artifact,
             started_at_utc=START,
             completed_at_utc=START + timedelta(minutes=1),
+            inputs=_inputs(),
         )
 
     assert paths.gold_build_profile(artifact.build_id).is_file()

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from application.gold_catalog import LATEST_COMPATIBLE, GoldBuildStatus, GoldCompatibility
-from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
+from application.gold_frame import (
+    GOLD_COLUMNS,
+    GOLD_FEATURE_VERSION,
+    GOLD_SCHEMA_VERSION,
+    GOLD_SOURCE_SERIES,
+    SilverInputSignature,
+)
 from application.gold_publication import GoldPublisher
 from application.gold_retention import GoldRetentionService
 from application.gold_sidecars import GoldSidecarBuilder
@@ -48,6 +54,13 @@ def _frame(offset: float) -> pl.DataFrame:
     )
 
 
+def _inputs() -> tuple[SilverInputSignature, ...]:
+    return tuple(
+        SilverInputSignature(series_id, 2, date(2026, 8, 18), date(2026, 8, 19), f"{index:064x}")
+        for index, series_id in enumerate(GOLD_SOURCE_SERIES)
+    )
+
+
 def _published_stack(
     tmp_path: Path,
 ) -> tuple[LakePaths, GoldCatalogRepository, GoldMaterializedViewWriter]:
@@ -69,7 +82,7 @@ def _published_stack(
     views = GoldMaterializedViewWriter(paths)
     publisher = GoldPublisher(catalog, bundle, views, clock=lambda: START)
     for index in range(6):
-        publisher.publish(_frame(float(index * 10)))
+        publisher.publish(_frame(float(index * 10)), inputs=_inputs())
     return paths, catalog, views
 
 

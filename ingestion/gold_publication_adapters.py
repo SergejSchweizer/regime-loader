@@ -8,7 +8,7 @@ from pathlib import Path
 
 import polars as pl
 
-from application.gold_frame import GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
+from application.gold_frame import GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION, SilverInputSignature
 from application.gold_publication import GoldPublicationBundle
 from application.paths import LakePaths
 from ingestion.gold_build_store import GoldBuildArtifact, GoldBuildStore
@@ -59,16 +59,20 @@ class GoldBundleAdapter:
         *,
         build_id: str,
         started_at_utc: datetime,
+        inputs: tuple[SilverInputSignature, ...],
     ) -> GoldPublicationBundle:
+        if not inputs:
+            raise ValueError("Gold publication requires certified Silver input provenance")
         artifact = self._build_store.create(frame, build_id=build_id)
         completed = _utc(self._clock())
         sidecars = self._sidecar_store.create(
             artifact,
             started_at_utc=started_at_utc,
             completed_at_utc=completed,
+            inputs=inputs,
         )
         self._fault("after_bundle_create")
-        self._validate_candidate(artifact, sidecars)
+        self._validate_candidate(artifact, sidecars, inputs)
         return GoldPublicationBundle(
             build_id=artifact.build_id,
             completed_at_utc=completed,
@@ -86,6 +90,7 @@ class GoldBundleAdapter:
         self,
         artifact: GoldBuildArtifact,
         sidecars: GoldSidecarArtifacts,
+        inputs: tuple[SilverInputSignature, ...],
     ) -> None:
         build_id = artifact.build_id
         build_root = self._paths.gold_build_root(build_id)
@@ -104,6 +109,8 @@ class GoldBundleAdapter:
             raise ValueError("Gold candidate build manifest schema_version mismatch")
         if sidecars.manifest.feature_version != GOLD_FEATURE_VERSION:
             raise ValueError("Gold candidate build manifest feature_version mismatch")
+        if not sidecars.manifest.provenance_certified or sidecars.manifest.inputs != inputs:
+            raise ValueError("Gold candidate input provenance mismatch")
         if sidecars.manifest.row_count != artifact.row_count:
             raise ValueError("Gold candidate build manifest row count mismatch")
         if sidecars.manifest.data_sha256 != artifact.data_sha256:

@@ -10,7 +10,7 @@ from typing import Protocol
 import polars as pl
 
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
-from application.gold_frame import GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
+from application.gold_frame import GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION, SilverInputSignature
 
 _DATASET_ID = "regime_features_daily"
 Clock = Callable[[], datetime]
@@ -62,6 +62,7 @@ class GoldBundlePort(Protocol):
         *,
         build_id: str,
         started_at_utc: datetime,
+        inputs: tuple[SilverInputSignature, ...],
     ) -> GoldPublicationBundle: ...
 
 
@@ -121,7 +122,12 @@ class GoldPublisher:
         self.event_sink("views:reconciled")
         return records
 
-    def publish(self, frame: pl.DataFrame) -> GoldCatalogRecord:
+    def publish(
+        self,
+        frame: pl.DataFrame,
+        *,
+        inputs: tuple[SilverInputSignature, ...] = (),
+    ) -> GoldCatalogRecord:
         """Build, physically validate, atomically promote, then refresh materialized views."""
         records = self.reconcile()
         build_id = self.bundle.next_build_id()
@@ -153,6 +159,7 @@ class GoldPublisher:
                 frame,
                 build_id=build_id,
                 started_at_utc=started_at,
+                inputs=inputs,
             )
             self.event_sink("bundle:validated")
             promoted = self._promoted_records(registered, candidate)

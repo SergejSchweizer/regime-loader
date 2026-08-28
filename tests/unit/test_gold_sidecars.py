@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import polars as pl
 import pytest
 
-from application.gold_frame import GOLD_COLUMNS
+from application.gold_frame import GOLD_COLUMNS, GOLD_SOURCE_SERIES, SilverInputSignature
 from application.gold_sidecars import (
     GoldSidecarBuilder,
     expected_manifest_keys,
@@ -34,6 +34,51 @@ def _frame() -> pl.DataFrame:
             **{column: pl.Float64 for column in GOLD_COLUMNS[1:]},
         },
     )
+
+
+def _inputs() -> tuple[SilverInputSignature, ...]:
+    return tuple(
+        SilverInputSignature(series_id, 2, date(2026, 8, 19), date(2026, 8, 20), f"{index:064x}")
+        for index, series_id in enumerate(GOLD_SOURCE_SERIES)
+    )
+
+
+def test_manifest_certifies_ordered_silver_input_provenance() -> None:
+    manifest = GoldSidecarBuilder(git_commit_hash=GIT_SHA).build(
+        _frame(),
+        build_id="20260819T020000Z",
+        started_at_utc=START,
+        completed_at_utc=START,
+        data_path="versions/build_id=20260819T020000Z/data.parquet",
+        data_sha256="b" * 64,
+        plot_path="versions/build_id=20260819T020000Z/feature_profile.png",
+        inputs=_inputs(),
+    )
+
+    assert manifest.manifest_version == 2
+    assert manifest.provenance_certified
+    assert manifest.as_dict()["inputs"] == [
+        {
+            "max_observation_date": "2026-08-20",
+            "min_observation_date": "2026-08-19",
+            "row_count": 2,
+            "series_id": signature.series_id,
+            "sha256": signature.sha256,
+        }
+        for signature in _inputs()
+    ]
+
+    with pytest.raises(ValueError, match="series order"):
+        GoldSidecarBuilder(git_commit_hash=GIT_SHA).build(
+            _frame(),
+            build_id="20260819T020000Z",
+            started_at_utc=START,
+            completed_at_utc=START,
+            data_path="versions/build_id=20260819T020000Z/data.parquet",
+            data_sha256="b" * 64,
+            plot_path="versions/build_id=20260819T020000Z/feature_profile.png",
+            inputs=tuple(reversed(_inputs())),
+        )
 
 
 def test_manifest_has_exact_deterministic_json_contract_without_publication_status() -> None:

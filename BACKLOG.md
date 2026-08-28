@@ -1947,11 +1947,11 @@ Acceptance:
 ## PR-51: Persist Exact Silver Inputs In Every Gold Build Manifest
 
 PR name: `gold-input-provenance-manifest`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: none
 Git branch: `pr-51/gold-input-provenance-manifest`
-Git status: `not-started (branch absent)`
+Git status: `active-clean`
 Agent lane: Gold provenance; one weak agent
 Depends on: PR-50
 Commit: `feat(pr-51): persist gold input provenance`

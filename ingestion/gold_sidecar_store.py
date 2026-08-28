@@ -17,7 +17,7 @@ import polars as pl
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
-from application.gold_frame import GOLD_COLUMNS
+from application.gold_frame import GOLD_COLUMNS, SilverInputSignature
 from application.gold_sidecars import (
     GoldBuildManifest,
     GoldSidecarBuilder,
@@ -183,7 +183,10 @@ class GoldSidecarStore:
         *,
         started_at_utc: datetime,
         completed_at_utc: datetime,
+        inputs: tuple[SilverInputSignature, ...] = (),
     ) -> GoldSidecarArtifacts:
+        if not inputs:
+            raise ValueError("Gold sidecar creation requires certified Silver input provenance")
         manifest_path = self._paths.gold_build_manifest(artifact.build_id)
         plot_path = self._paths.gold_build_profile(artifact.build_id)
         if manifest_path.exists() or plot_path.exists():
@@ -201,6 +204,7 @@ class GoldSidecarStore:
             data_path=self._relative(artifact.data_path),
             data_sha256=artifact.data_sha256,
             plot_path=self._relative(plot_path),
+            inputs=inputs,
         )
         manifest_bytes = manifest.to_json_bytes()
         self._fault("after_manifest_bytes")
