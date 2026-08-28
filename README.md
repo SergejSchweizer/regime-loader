@@ -418,6 +418,8 @@ coverage
 >= 90.0%
 ```
 
+The offline test targets use four isolated workers by default. Override the count for constrained hosts or deterministic troubleshooting, for example `make integration TEST_WORKERS=1`.
+
 Live provider tests are marked `network` and are excluded from required gates.
 
 ## Repository Structure

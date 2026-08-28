@@ -2234,6 +2234,29 @@ Acceptance:
 - A2 (verifies R2): Gold schema/order, sidecar formula hash, semantic-version, unit, and offline integration tests prove the new immutable schema contract.
 - A3 (verifies R3): repository tests prove idempotent additive DDL and fail-closed incompatible versions; a live delta sync verifies all 13 columns exist and are populated from the schema-2 current build.
 
+## PR-63: Parallelize Required Offline Test Execution
+
+PR name: `parallelize-offline-tests`
+Status: In Progress
+Updated: 2026-08-28
+PR: none
+Git branch: `pr-63/parallelize-offline-tests`
+Git status: `active-clean`
+Agent lane: Test infrastructure; one agent only
+Depends on: PR-40
+Commit: `perf(pr-63): parallelize offline test execution`
+Design patterns: Configuration Policy, Command.
+
+Description:
+- R1: Execute the required offline unit and integration suites with a bounded default worker count while preserving their current markers, test selection, and coverage collection.
+- R2: Permit operators and CI to override the worker count through one documented Make variable without changing source code.
+- R3: Keep the combined coverage threshold and all mandatory quality-gate stages unchanged.
+
+Acceptance:
+- A1 (verifies R1): both required suites complete successfully with isolated parallel workers and the integration suite remains provider-network-free.
+- A2 (verifies R2): `TEST_WORKERS=1` provides deterministic serial fallback and a higher value is accepted by the Make targets.
+- A3 (verifies R3): `make quality-gate` still runs lint, type, unit, integration, and the unchanged combined coverage threshold.
+
 ### Corrected Production Completion Gate
 
 The repository's earlier MVP and PR-31..PR-39 completion statements describe historical implementation milestones only. Production serving correctness is not certified until PR-41 through PR-60 are merged and PR-61 has completed the authoritative source reconcile, certified Gold rebuild, loader-owned PostgreSQL reconstruction, independent real-target verification, and zero-mutation replay with a sanitized `PASS` report. Until then, no existing PostgreSQL data should be treated as independently verified merely because unit/fake-adapter tests or count/min/max checks pass.
