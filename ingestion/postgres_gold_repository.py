@@ -212,6 +212,7 @@ _ROW_HASHES = f"{_quote(POSTGRES_SYNC_SCHEMA)}.{_quote(POSTGRES_ROW_HASH_TABLE)}
 _FEATURE_COLUMNS = GOLD_COLUMNS[1:]
 _MIGRATION_LEDGER_TABLE = "schema_migrations"
 _MIGRATION_LEDGER = f"{_quote(POSTGRES_SYNC_SCHEMA)}.{_quote(_MIGRATION_LEDGER_TABLE)}"
+_POSTGRES_OWNER_ROLE = "regime-loader-owner"
 
 _CONSUMER_DDL = f"""CREATE TABLE IF NOT EXISTS {_CONSUMER} (
     {_quote("timestamp_m1")} TIMESTAMPTZ(6) NOT NULL PRIMARY KEY,
@@ -945,3 +946,73 @@ class PostgresGoldSchemaMigrator:
             _raise_sanitized_error("Gold schema migration", exc)
         finally:
             connection.close()
+
+
+class PostgresGoldSchemaReconstructor:
+    """Admin-only recreation of precisely the serving schemas before canonical migration."""
+
+    def __init__(
+        self,
+        config: PostgresAdminConfig,
+        *,
+        connection_factory: ConnectionFactory = _default_connection,
+    ) -> None:
+        self._config = config
+        self._connection_factory = connection_factory
+
+    def recreate(self) -> None:
+        connection: ConnectionPort | None = None
+        try:
+            connection = self._connection_factory(self._config)
+            cursor = connection.cursor()
+            try:
+                for statement in _session_configuration(self._config.timeout_policy):
+                    cursor.execute(statement)
+                cursor.execute(f"DROP SCHEMA IF EXISTS {_quote(POSTGRES_CONSUMER_SCHEMA)} CASCADE")
+                cursor.execute(f"DROP SCHEMA IF EXISTS {_quote(POSTGRES_SYNC_SCHEMA)} CASCADE")
+                for schema in (POSTGRES_CONSUMER_SCHEMA, POSTGRES_SYNC_SCHEMA):
+                    cursor.execute(
+                        f"CREATE SCHEMA {_quote(schema)} "
+                        f"AUTHORIZATION {_quote(_POSTGRES_OWNER_ROLE)}"
+                    )
+                    cursor.execute(f"REVOKE ALL ON SCHEMA {_quote(schema)} FROM PUBLIC")
+                    cursor.execute(
+                        f"REVOKE CREATE ON SCHEMA {_quote(schema)} FROM {_quote(POSTGRES_USER)}"
+                    )
+                    cursor.execute(
+                        f"GRANT USAGE ON SCHEMA {_quote(schema)} TO {_quote(POSTGRES_USER)}"
+                    )
+                cursor.execute(f"SET ROLE {_quote(_POSTGRES_OWNER_ROLE)}")
+                cursor.execute(_MIGRATION_LEDGER_DDL)
+                for version, statements in enumerate(_MIGRATIONS, start=1):
+                    for statement in statements:
+                        cursor.execute(statement)
+                    cursor.execute(
+                        f"INSERT INTO {_MIGRATION_LEDGER} (version, applied_at_utc) "
+                        "VALUES (%s, CURRENT_TIMESTAMP)",
+                        (version,),
+                    )
+                cursor.execute("RESET ROLE")
+                for schema, table in (
+                    (POSTGRES_CONSUMER_SCHEMA, POSTGRES_CONSUMER_TABLE),
+                    (POSTGRES_SYNC_SCHEMA, POSTGRES_SYNC_STATE_TABLE),
+                    (POSTGRES_SYNC_SCHEMA, POSTGRES_ROW_HASH_TABLE),
+                ):
+                    cursor.execute(
+                        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
+                        f"{_quote(schema)}.{_quote(table)} TO {_quote(POSTGRES_USER)}"
+                    )
+                cursor.execute(
+                    f"GRANT SELECT ON TABLE {_MIGRATION_LEDGER} TO {_quote(POSTGRES_USER)}"
+                )
+                PostgresGoldSyncRepository._assert_schema_contract(cursor)
+            finally:
+                cursor.close()
+            connection.commit()
+        except Exception as exc:
+            if connection is not None:
+                connection.rollback()
+            _raise_sanitized_error("Gold schema reconstruction", exc)
+        finally:
+            if connection is not None:
+                connection.close()

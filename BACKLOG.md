@@ -2156,11 +2156,11 @@ Acceptance:
 ## PR-60: Add Independent Live PostgreSQL Conformance Verifier
 
 PR name: `postgres-live-conformance-verifier`
-Status: In Progress
+Status: Merged
 Updated: 2026-08-28
 PR: #66
 Git branch: `pr-60/postgres-live-conformance-verifier`
-Git status: `pushed-ci-failing`
+Git status: `merged`
 Agent lane: Production verification; one agent only
 Depends on: PR-41, PR-43, PR-46, PR-52, PR-53, PR-54, PR-56, PR-57, PR-58
 Commit: `test(pr-60): verify live postgres conformance`
@@ -2181,11 +2181,11 @@ Acceptance:
 ## PR-61: Authoritative Source Reconcile, Gold Rebuild, And PostgreSQL Rewrite
 
 PR name: `authoritative-production-reconstruction`
-Status: Planned
+Status: In Progress
 Updated: 2026-08-24
 PR: TBD
 Git branch: `pr-61/authoritative-production-reconstruction`
-Git status: `not-started (branch absent)`
+Git status: `active-dirty: implementation in progress`
 Agent lane: Production cutover; one agent only
 Depends on: PR-41, PR-42, PR-43, PR-44, PR-45, PR-46, PR-47, PR-48, PR-49, PR-50, PR-51, PR-52, PR-53, PR-54, PR-55, PR-56, PR-57, PR-58, PR-59, PR-60
 Commit: `chore(pr-61): reconstruct production serving state`
@@ -2214,11 +2214,11 @@ Acceptance:
 ## PR-62: Add One-Observation Deltas To Every Source Feature
 
 PR name: `gold-one-observation-deltas`
-Status: In Progress
+Status: Merged
 Updated: 2026-08-27
-PR: TBD
+PR: #43
 Git branch: `pr-62/delta-one-observation-features`
-Git status: `active-clean`
+Git status: `merged`
 Agent lane: Gold/PostgreSQL feature delivery; one agent only
 Depends on: PR-40
 Commit: `feat(pr-62): add one-observation feature deltas`
@@ -2237,11 +2237,11 @@ Acceptance:
 ## PR-63: Parallelize Required Offline Test Execution
 
 PR name: `parallelize-offline-tests`
-Status: In Progress
+Status: Merged
 Updated: 2026-08-28
-PR: none
+PR: #53
 Git branch: `pr-63/parallelize-offline-tests`
-Git status: `active-clean`
+Git status: `merged`
 Agent lane: Test infrastructure; one agent only
 Depends on: PR-40
 Commit: `perf(pr-63): parallelize offline test execution`
@@ -2260,11 +2260,11 @@ Acceptance:
 ## PR-64: Deduplicate Pull Request Quality-Gate Triggers
 
 PR name: `deduplicate-pr-ci-triggers`
-Status: In Progress
+Status: Merged
 Updated: 2026-08-28
-PR: none
+PR: #56
 Git branch: `pr-64/deduplicate-pr-ci-triggers`
-Git status: `active-clean`
+Git status: `merged`
 Agent lane: CI infrastructure; one agent only
 Depends on: PR-40
 Commit: `ci(pr-64): deduplicate pull request test runs`
@@ -2281,11 +2281,11 @@ Acceptance:
 ## PR-65: Accelerate Gold Integration Test Rendering
 
 PR name: `fast-gold-test-renderer`
-Status: In Progress
+Status: Merged
 Updated: 2026-08-28
-PR: none
+PR: #58
 Git branch: `pr-65/fast-gold-test-renderer`
-Git status: `active-clean`
+Git status: `merged`
 Agent lane: Test infrastructure; one agent only
 Depends on: PR-40
 Commit: `perf(pr-65): inject fast Gold test renderer`

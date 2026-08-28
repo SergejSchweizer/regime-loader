@@ -13,12 +13,18 @@ LOG_DIR="$PROJECT_ROOT/.logs"
 LOG_PATH="$LOG_DIR/regime-loader.log"
 LOCK_DIR="$PROJECT_ROOT/.locks"
 LOCK_PATH="$LOCK_DIR/regime-loader-sunday.lock"
+MAINTENANCE_PATH="$PROJECT_ROOT/.maintenance/regime-loader-reconstruction"
 
 if ! REGIME_LOADER_GIT_SHA=$(git -C "$PROJECT_ROOT" rev-parse --verify HEAD); then
 	printf 'Unable to resolve repository Git identity\n' >&2
 	exit 2
 fi
 export REGIME_LOADER_GIT_SHA
+
+if [[ "${REGIME_LOADER_SUNDAY_VERIFY_ONLY:-}" == "true" ]]; then
+	printf 'Sunday runner verification completed without data operations\n'
+	exit 0
+fi
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$LOCK_DIR"
@@ -30,6 +36,11 @@ fi
 exec >>"$LOG_PATH" 2>&1
 
 printf '\n[%s] Starting Sunday regime-loader job\n' "$(date --iso-8601=seconds)"
+
+if [[ -e "$MAINTENANCE_PATH" ]]; then
+	printf 'Sunday regime-loader job is disabled for production reconstruction\n' >&2
+	exit 4
+fi
 
 eval "$("$PYTHON" "$PROJECT_ROOT/scripts/export_cron_config.py" "$CONFIG_FILE")"
 

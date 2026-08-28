@@ -22,6 +22,7 @@ from ingestion.postgres_gold_repository import (
     PostgresAdminConfig,
     PostgresGoldRepositoryError,
     PostgresGoldSchemaMigrator,
+    PostgresGoldSchemaReconstructor,
     PostgresGoldSyncRepository,
     PostgresLockContentionError,
     PostgresSyncConfig,
@@ -181,6 +182,44 @@ class Factory:
 
 def _execute_queries(connection: FakeConnection) -> list[str]:
     return [str(query) for kind, query, _ in connection.events if kind == "execute"]
+
+
+def test_schema_reconstructor_recreates_only_loader_schemas_and_revalidates_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = FakeConnection()
+    verified = False
+
+    def verify(cursor: object) -> None:
+        nonlocal verified
+        verified = True
+
+    monkeypatch.setattr(module.PostgresGoldSyncRepository, "_assert_schema_contract", verify)
+
+    PostgresGoldSchemaReconstructor(
+        _admin_config(), connection_factory=Factory(connection)
+    ).recreate()
+
+    queries = _execute_queries(connection)
+    assert 'DROP SCHEMA IF EXISTS "regime_loader" CASCADE' in queries
+    assert 'DROP SCHEMA IF EXISTS "regime_loader_sync" CASCADE' in queries
+    assert all("DROP SCHEMA" not in query or "regime_loader" in query for query in queries)
+    assert 'SET ROLE "regime-loader-owner"' in queries
+    assert 'GRANT USAGE ON SCHEMA "regime_loader" TO "regime-loader"' in queries
+    assert verified
+    assert ("commit", None, None) in connection.events
+
+
+def test_schema_reconstructor_rolls_back_and_sanitizes_failure() -> None:
+    connection = FakeConnection(fail_on="DROP SCHEMA")
+
+    with pytest.raises(PostgresGoldRepositoryError) as error:
+        PostgresGoldSchemaReconstructor(
+            _admin_config(), connection_factory=Factory(connection)
+        ).recreate()
+
+    assert "repo-secret" not in str(error.value)
+    assert ("rollback", None, None) in connection.events
 
 
 def test_config_requires_exact_endpoint_role_and_hides_password() -> None:

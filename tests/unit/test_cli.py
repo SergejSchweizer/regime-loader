@@ -82,6 +82,7 @@ def test_parser_exposes_exact_operational_command_surface() -> None:
         "gold-sync-postgres",
         "postgres-migrate",
         "postgres-verify",
+        "postgres-reconstruct",
         "inventory",
         "run-daily",
     }

@@ -13,6 +13,7 @@ from application.gold_frame import GOLD_COLUMNS
 from application.paths import LakePaths
 from application.postgres_conformance import PostgresConformanceReport
 from application.postgres_sync import GoldSyncResult
+from application.production_reconstruction import ProductionReconstructionReport
 from ingestion.gold_build_store import GoldBuildStore
 from ingestion.gold_sync_source import FilesystemGoldFrameSource
 
@@ -257,3 +258,60 @@ def test_postgres_verification_command_writes_only_deterministic_report(
         '"summaries": {"row_count": 1}, '
         '"temporal_contract_version": "pg-temporal-v1"}\n'
     )
+
+
+def test_reconstruction_requires_explicit_execution_before_runtime_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def runtime_stub(**kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return object()
+
+    monkeypatch.setattr(cli, "build_production_reconstruction_runtime", runtime_stub)
+
+    assert (
+        cli.main(["postgres-reconstruct"], stdout=io.StringIO(), stderr=io.StringIO())
+        == cli.EXIT_INPUT
+    )
+    assert calls == 0
+
+
+def test_reconstruction_writes_only_pass_report_to_required_acceptance_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class ReconstructionStub:
+        def run(self) -> ProductionReconstructionReport:
+            return ProductionReconstructionReport(
+                "PASS",
+                (
+                    "maintenance",
+                    "locks",
+                    "endpoint",
+                    "backup",
+                    "reconcile",
+                    "silver",
+                    "gold",
+                    "schema",
+                    "publication",
+                    "verification",
+                    "replay",
+                    "sunday_wrapper",
+                ),
+            )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "build_production_reconstruction_runtime",
+        lambda **kwargs: cli.ProductionReconstructionRuntime(ReconstructionStub()),
+    )
+    output = io.StringIO()
+
+    assert cli.main(["postgres-reconstruct", "--execute"], stdout=output, stderr=io.StringIO()) == 0
+    artifact = tmp_path / "artifacts/acceptance/postgres-production-reconstruction-v2.json"
+    assert artifact.read_text(encoding="ascii") == output.getvalue()
+    assert "private" not in output.getvalue()
