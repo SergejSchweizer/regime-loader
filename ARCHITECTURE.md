@@ -136,6 +136,13 @@ migrations. It is composed with protected `MARKET_REGIME_POSTGRES_ADMIN_*` crede
 which are distinct from runtime `PG*` credentials. Normal cron export provides runtime
 configuration only and never exports administrator credentials.
 
+`postgres-verify` is a separate read-mostly command using the runtime endpoint. Its application
+service compares the certified current Gold bundle with independently read consumer rows, digest
+index, state, and summary. A dedicated ingestion adapter separately validates exact owned schema,
+role ownership and grants, UTC session settings, timeout/application identity, and rollback-only
+microsecond timestamp probes. It returns a deterministic, sanitized `PASS|FAIL` report and cannot
+publish, synchronize, migrate, or create durable probe state.
+
 ## Initial Series Registry
 
 Exactly these canonical series are in MVP:

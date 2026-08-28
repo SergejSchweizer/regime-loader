@@ -23,6 +23,8 @@ from application.gold_sidecars import GoldSidecarBuilder
 from application.paths import LakePaths
 from application.planner import PlannerConfig
 from application.ports.market_data import MarketDataProvider
+from application.postgres_conformance import PostgresConformanceVerifier
+from application.postgres_conformance_service import GoldPostgresConformanceVerifier
 from application.postgres_sync import GoldSchemaMigrator
 from application.postgres_sync_service import GoldPostgresDeltaSync
 from application.registry import SERIES_REGISTRY
@@ -41,6 +43,7 @@ from ingestion.gold_sync_source import FilesystemGoldFrameSource
 from ingestion.httpx_adapter import HttpxTransport
 from ingestion.inventory_refresh import InventoryRefreshService
 from ingestion.operational_repository import read_inventory
+from ingestion.postgres_conformance_verifier import PostgresLiveDatabaseConformanceInspector
 from ingestion.postgres_gold_repository import (
     PostgresAdminConfig,
     PostgresGoldSchemaMigrator,
@@ -59,6 +62,7 @@ _SOURCE_COMMANDS = frozenset({"bootstrap", "update", "reconcile", "run-daily"})
 _GOLD_COMMANDS = frozenset({"gold-build", "run-daily"})
 _POSTGRES_SYNC_COMMAND = "gold-sync-postgres"
 _POSTGRES_MIGRATE_COMMAND = "postgres-migrate"
+_POSTGRES_VERIFY_COMMAND = "postgres-verify"
 _UNUSED_GIT_IDENTITY = "0" * 40
 
 
@@ -108,6 +112,11 @@ class PostgresMigrationRuntime:
     event_sink: JsonEventSink
 
 
+@dataclass(frozen=True, slots=True)
+class PostgresVerificationRuntime:
+    verifier: PostgresConformanceVerifier
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="regime-loader")
     parser.add_argument("--lake-root", type=Path, default=Path("lake"))
@@ -120,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("gold-build")
     subparsers.add_parser(_POSTGRES_SYNC_COMMAND)
     subparsers.add_parser(_POSTGRES_MIGRATE_COMMAND)
+    subparsers.add_parser(_POSTGRES_VERIFY_COMMAND)
     inventory = subparsers.add_parser("inventory")
     inventory.add_argument("--json", action="store_true", dest="as_json")
     inventory.add_argument("--series", action="append", default=[])
@@ -269,6 +279,22 @@ def build_postgres_migration_runtime(*, stderr: TextIO) -> PostgresMigrationRunt
     )
 
 
+def build_postgres_verification_runtime(
+    *, lake_root: Path, stderr: TextIO
+) -> PostgresVerificationRuntime:
+    config = PostgresSyncConfig.from_env()
+    paths = LakePaths(lake_root)
+    build_store = GoldBuildStore(paths)
+    return PostgresVerificationRuntime(
+        verifier=GoldPostgresConformanceVerifier(
+            catalog=GoldCatalogRepository(paths.gold_manifest_parquet()),
+            source=FilesystemGoldFrameSource(paths, build_store),
+            repository=PostgresGoldSyncRepository(config),
+            inspector=PostgresLiveDatabaseConformanceInspector(config),
+        )
+    )
+
+
 def _dispatch(
     runtime: Runtime,
     args: argparse.Namespace,
@@ -334,6 +360,16 @@ def _dispatch_postgres_migration(runtime: PostgresMigrationRuntime) -> int:
     return EXIT_SUCCESS
 
 
+def _dispatch_postgres_verification(
+    runtime: PostgresVerificationRuntime,
+    *,
+    stdout: TextIO,
+) -> int:
+    report = runtime.verifier.verify()
+    stdout.write(report.as_json() + "\n")
+    return EXIT_SUCCESS if report.status == "PASS" else EXIT_PIPELINE
+
+
 def _failure_event(
     stderr: TextIO,
     *,
@@ -382,6 +418,11 @@ def main(
             )
         if command == _POSTGRES_MIGRATE_COMMAND:
             return _dispatch_postgres_migration(build_postgres_migration_runtime(stderr=error))
+        if command == _POSTGRES_VERIFY_COMMAND:
+            return _dispatch_postgres_verification(
+                build_postgres_verification_runtime(lake_root=args.lake_root, stderr=error),
+                stdout=output,
+            )
         runtime = build_runtime(
             lake_root=args.lake_root,
             command=command,

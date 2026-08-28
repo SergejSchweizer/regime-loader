@@ -1836,7 +1836,7 @@ Status: In Progress
 Updated: 2026-08-28
 PR: none
 Git branch: `pr-46/scheduler-timezone-contract`
-Git status: `active-clean`
+Git status: `pushed-ci-failing`
 Agent lane: Scheduler semantics; one weak agent
 Depends on: PR-45
 Commit: `fix(pr-46): freeze scheduler timezone contract`
@@ -2156,11 +2156,11 @@ Acceptance:
 ## PR-60: Add Independent Live PostgreSQL Conformance Verifier
 
 PR name: `postgres-live-conformance-verifier`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: #66
 Git branch: `pr-60/postgres-live-conformance-verifier`
-Git status: `not-started (branch absent)`
+Git status: `pushed-ci-failing`
 Agent lane: Production verification; one agent only
 Depends on: PR-41, PR-43, PR-46, PR-52, PR-53, PR-54, PR-56, PR-57, PR-58
 Commit: `test(pr-60): verify live postgres conformance`
