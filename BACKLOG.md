@@ -1719,7 +1719,7 @@ Acceptance:
 PR name: `postgres-temporal-boundary-hardening`
 Status: Planned
 Updated: 2026-08-24
-PR: TBD
+PR: #67
 Git branch: `pr-41/postgres-temporal-boundary-hardening`
 Git status: `not-started (branch absent)`
 Agent lane: PostgreSQL temporal contracts; one weak agent
@@ -1951,7 +1951,7 @@ Status: In Progress
 Updated: 2026-08-28
 PR: none
 Git branch: `pr-51/gold-input-provenance-manifest`
-Git status: `active-clean`
+Git status: `pushed-ci-failing`
 Agent lane: Gold provenance; one weak agent
 Depends on: PR-50
 Commit: `feat(pr-51): persist gold input provenance`
