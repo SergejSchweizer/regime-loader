@@ -106,12 +106,12 @@ class FakeCursor:
                 for specification in module._SCHEMA_SPECIFICATION
                 for ordinal, column in enumerate(specification.columns, start=1)
             ]
-        elif "FROM information_schema.table_constraints" in query:
+        elif "FROM pg_constraint" in query:
             self.many = [
                 (
                     specification.schema,
                     specification.name,
-                    "PRIMARY KEY",
+                    "p",
                     specification.primary_key,
                 )
                 for specification in module._SCHEMA_SPECIFICATION

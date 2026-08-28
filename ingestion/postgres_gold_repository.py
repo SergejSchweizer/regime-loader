@@ -319,18 +319,17 @@ _OWNED_COLUMNS_SQL = """SELECT table_schema, table_name, ordinal_position, colum
 FROM information_schema.columns
 WHERE table_schema IN (%s, %s)
 ORDER BY table_schema, table_name, ordinal_position"""
-_OWNED_KEYS_SQL = """SELECT constraints.table_schema, constraints.table_name,
-    constraints.constraint_type,
-    array_agg(keys.column_name::text ORDER BY keys.ordinal_position)
-FROM information_schema.table_constraints AS constraints
-JOIN information_schema.key_column_usage AS keys
-    ON constraints.constraint_catalog = keys.constraint_catalog
-    AND constraints.constraint_schema = keys.constraint_schema
-    AND constraints.constraint_name = keys.constraint_name
-WHERE constraints.table_schema IN (%s, %s)
-    AND constraints.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
-GROUP BY constraints.table_schema, constraints.table_name, constraints.constraint_type
-ORDER BY constraints.table_schema, constraints.table_name, constraints.constraint_type"""
+_OWNED_KEYS_SQL = """SELECT namespaces.nspname, classes.relname, constraints.contype,
+    array_agg(attributes.attname::text ORDER BY keys.ordinality)
+FROM pg_constraint AS constraints
+JOIN pg_class AS classes ON classes.oid = constraints.conrelid
+JOIN pg_namespace AS namespaces ON namespaces.oid = classes.relnamespace
+JOIN unnest(constraints.conkey) WITH ORDINALITY AS keys(attnum, ordinality) ON TRUE
+JOIN pg_attribute AS attributes
+    ON attributes.attrelid = classes.oid AND attributes.attnum = keys.attnum
+WHERE namespaces.nspname IN (%s, %s) AND constraints.contype IN ('p', 'u')
+GROUP BY namespaces.nspname, classes.relname, constraints.contype
+ORDER BY namespaces.nspname, classes.relname, constraints.contype"""
 
 _INSERT_ROW_SQL = (
     f"INSERT INTO {_CONSUMER} ({', '.join(_quote(column) for column in GOLD_COLUMNS)}) "
@@ -862,7 +861,7 @@ class PostgresGoldSyncRepository:
         for row in cursor.fetchall():
             if len(row) != 4:
                 raise ValueError("PostgreSQL key contract query returned unexpected width")
-            if _as_text(row[2], "key type") != "PRIMARY KEY":
+            if _as_text(row[2], "key type") not in {"PRIMARY KEY", "p"}:
                 raise ValueError("PostgreSQL schema contains an unexpected unique key")
             columns = row[3]
             if not isinstance(columns, (list, tuple)) or not all(
