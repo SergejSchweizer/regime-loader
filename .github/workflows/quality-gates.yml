@@ -61,6 +61,22 @@ jobs:
   integration:
     name: integration
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: regime_loader_test
+          POSTGRES_USER: regime_loader_test
+          POSTGRES_PASSWORD: regime_loader_test
+        options: >-
+          --health-cmd "pg_isready -U regime_loader_test -d regime_loader_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      POSTGRES_TEST_DSN: postgresql://regime_loader_test:regime_loader_test@localhost:5432/regime_loader_test
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
