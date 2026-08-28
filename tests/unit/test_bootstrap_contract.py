@@ -21,6 +21,8 @@ def test_quality_workflow_has_exact_required_jobs_and_triggers() -> None:
     text = (ROOT / ".github/workflows/quality-gates.yml").read_text(encoding="utf-8")
     for trigger in ("push:", "pull_request:", "merge_group:"):
         assert trigger in text
+    assert "  push:\n    branches: [main]" in text
+    assert "  push:\n  pull_request:" not in text
     for job in ("  lint:\n", "  type:\n", "  unit:\n", "  integration:\n", "  coverage:\n"):
         assert job in text
     assert "needs: [unit, integration]" in text
