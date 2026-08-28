@@ -83,14 +83,9 @@ def _state(timestamp: datetime) -> GoldSyncState:
 
 
 @pytest.mark.integration
-def test_real_postgres_schema_utc_transaction_lock_and_round_trip(
+def test_real_postgres_migrations_are_idempotent_and_round_trip(
     repository: PostgresGoldSyncRepository, postgres_dsn: str
 ) -> None:
-    with psycopg.connect(postgres_dsn, autocommit=True) as connection:
-        connection.execute(
-            f"CREATE TABLE {POSTGRES_CONSUMER_SCHEMA}.{POSTGRES_CONSUMER_TABLE} "
-            "(timestamp_m1 TIMESTAMPTZ(6) PRIMARY KEY)"
-        )
     repository.ensure_schema()
     repository.ensure_schema()
     with psycopg.connect(postgres_dsn) as connection:
@@ -99,7 +94,11 @@ def test_real_postgres_schema_utc_transaction_lock_and_round_trip(
             "WHERE table_schema = %s AND table_name = %s",
             (POSTGRES_CONSUMER_SCHEMA, POSTGRES_CONSUMER_TABLE),
         ).fetchall()
+        migrations = connection.execute(
+            "SELECT version FROM regime_loader_sync.schema_migrations ORDER BY version"
+        ).fetchall()
     assert {column[0] for column in columns} == set(GOLD_COLUMNS)
+    assert migrations == [(1,), (2,), (3,)]
 
     timestamp = _timestamp(20)
     row = GoldRowPayload(timestamp, tuple(1.0 for _ in GOLD_COLUMNS[1:]))
@@ -253,3 +252,33 @@ def test_real_postgres_session_timeouts_bound_lock_and_statement(
         assert time.monotonic() - started < 1
         lock_holder.rollback()
     assert repository.summary(POSTGRES_DATASET_ID).row_count == 0
+
+
+@pytest.mark.parametrize(
+    "drift_sql",
+    (
+        "ALTER TABLE regime_loader_sync.gold_row_hashes DROP COLUMN row_sha256",
+        "ALTER TABLE regime_loader.regime_features_daily ADD COLUMN forbidden INTEGER",
+        "ALTER TABLE regime_loader_sync.gold_sync_state "
+        "ALTER COLUMN schema_version TYPE TEXT USING schema_version::text",
+        "ALTER TABLE regime_loader.regime_features_daily "
+        "ALTER COLUMN timestamp_m1 TYPE TIMESTAMPTZ(3)",
+        "ALTER TABLE regime_loader_sync.gold_sync_state ALTER COLUMN source_build_id DROP NOT NULL",
+        "ALTER TABLE regime_loader.regime_features_daily "
+        "DROP CONSTRAINT regime_features_daily_pkey",
+    ),
+    ids=("missing", "extra", "wrong-type", "wrong-precision", "wrong-nullability", "wrong-key"),
+)
+def test_real_postgres_schema_drift_fails_closed_before_sync(
+    repository: PostgresGoldSyncRepository,
+    postgres_dsn: str,
+    drift_sql: str,
+) -> None:
+    repository.ensure_schema()
+    with psycopg.connect(postgres_dsn, autocommit=True) as connection:
+        connection.execute(drift_sql)
+
+    with pytest.raises(
+        postgres_module.PostgresGoldRepositoryError, match="schema initialization failed"
+    ):
+        repository.ensure_schema()

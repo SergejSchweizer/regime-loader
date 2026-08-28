@@ -157,16 +157,13 @@ _CONSUMER = f"{_quote(POSTGRES_CONSUMER_SCHEMA)}.{_quote(POSTGRES_CONSUMER_TABLE
 _SYNC_STATE = f"{_quote(POSTGRES_SYNC_SCHEMA)}.{_quote(POSTGRES_SYNC_STATE_TABLE)}"
 _ROW_HASHES = f"{_quote(POSTGRES_SYNC_SCHEMA)}.{_quote(POSTGRES_ROW_HASH_TABLE)}"
 _FEATURE_COLUMNS = GOLD_COLUMNS[1:]
+_MIGRATION_LEDGER_TABLE = "schema_migrations"
+_MIGRATION_LEDGER = f"{_quote(POSTGRES_SYNC_SCHEMA)}.{_quote(_MIGRATION_LEDGER_TABLE)}"
 
 _CONSUMER_DDL = f"""CREATE TABLE IF NOT EXISTS {_CONSUMER} (
     {_quote("timestamp_m1")} TIMESTAMPTZ(6) NOT NULL PRIMARY KEY,
     {",\n    ".join(f"{_quote(column)} DOUBLE PRECISION NULL" for column in _FEATURE_COLUMNS)}
 )"""
-_CONSUMER_COLUMN_MIGRATIONS = tuple(
-    f"ALTER TABLE {_CONSUMER} ADD COLUMN IF NOT EXISTS {_quote(column)} DOUBLE PRECISION NULL"
-    for column in _FEATURE_COLUMNS
-)
-
 _SYNC_STATE_DDL = f"""CREATE TABLE IF NOT EXISTS {_SYNC_STATE} (
     dataset_id TEXT PRIMARY KEY,
     source_build_id TEXT NOT NULL,
@@ -185,6 +182,101 @@ _ROW_HASH_DDL = f"""CREATE TABLE IF NOT EXISTS {_ROW_HASHES} (
     row_sha256 CHAR(64) NOT NULL,
     PRIMARY KEY (dataset_id, timestamp_m1)
 )"""
+
+_MIGRATION_LEDGER_DDL = f"""CREATE TABLE IF NOT EXISTS {_MIGRATION_LEDGER} (
+    version INTEGER PRIMARY KEY,
+    applied_at_utc TIMESTAMPTZ(6) NOT NULL
+)"""
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresColumnSpecification:
+    name: str
+    data_type: str
+    precision: int | None
+    nullable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PostgresTableSpecification:
+    schema: str
+    name: str
+    columns: tuple[PostgresColumnSpecification, ...]
+    primary_key: tuple[str, ...]
+
+
+_TIMESTAMPTZ6_NOT_NULL = PostgresColumnSpecification(
+    "timestamp_m1", "timestamp with time zone", 6, False
+)
+_SCHEMA_SPECIFICATION = (
+    PostgresTableSpecification(
+        POSTGRES_CONSUMER_SCHEMA,
+        POSTGRES_CONSUMER_TABLE,
+        (_TIMESTAMPTZ6_NOT_NULL,)
+        + tuple(
+            PostgresColumnSpecification(column, "double precision", None, True)
+            for column in _FEATURE_COLUMNS
+        ),
+        ("timestamp_m1",),
+    ),
+    PostgresTableSpecification(
+        POSTGRES_SYNC_SCHEMA,
+        POSTGRES_SYNC_STATE_TABLE,
+        (
+            PostgresColumnSpecification("dataset_id", "text", None, False),
+            PostgresColumnSpecification("source_build_id", "text", None, False),
+            PostgresColumnSpecification("data_sha256", "character", 64, False),
+            PostgresColumnSpecification("schema_version", "integer", None, False),
+            PostgresColumnSpecification("feature_version", "integer", None, False),
+            PostgresColumnSpecification("row_count", "bigint", None, False),
+            PostgresColumnSpecification("min_timestamp", "timestamp with time zone", 6, True),
+            PostgresColumnSpecification("max_timestamp", "timestamp with time zone", 6, True),
+            PostgresColumnSpecification("synced_at_utc", "timestamp with time zone", 6, False),
+        ),
+        ("dataset_id",),
+    ),
+    PostgresTableSpecification(
+        POSTGRES_SYNC_SCHEMA,
+        POSTGRES_ROW_HASH_TABLE,
+        (
+            PostgresColumnSpecification("dataset_id", "text", None, False),
+            _TIMESTAMPTZ6_NOT_NULL,
+            PostgresColumnSpecification("row_sha256", "character", 64, False),
+        ),
+        ("dataset_id", "timestamp_m1"),
+    ),
+    PostgresTableSpecification(
+        POSTGRES_SYNC_SCHEMA,
+        _MIGRATION_LEDGER_TABLE,
+        (
+            PostgresColumnSpecification("version", "integer", None, False),
+            PostgresColumnSpecification("applied_at_utc", "timestamp with time zone", 6, False),
+        ),
+        ("version",),
+    ),
+)
+_MIGRATIONS = ((_CONSUMER_DDL,), (_SYNC_STATE_DDL,), (_ROW_HASH_DDL,))
+_OWNED_TABLES_SQL = """SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_schema IN (%s, %s) AND table_type = 'BASE TABLE'
+ORDER BY table_schema, table_name"""
+_OWNED_COLUMNS_SQL = """SELECT table_schema, table_name, ordinal_position, column_name,
+    data_type, datetime_precision, character_maximum_length, is_nullable
+FROM information_schema.columns
+WHERE table_schema IN (%s, %s)
+ORDER BY table_schema, table_name, ordinal_position"""
+_OWNED_KEYS_SQL = """SELECT constraints.table_schema, constraints.table_name,
+    constraints.constraint_type,
+    array_agg(keys.column_name::text ORDER BY keys.ordinal_position)
+FROM information_schema.table_constraints AS constraints
+JOIN information_schema.key_column_usage AS keys
+    ON constraints.constraint_catalog = keys.constraint_catalog
+    AND constraints.constraint_schema = keys.constraint_schema
+    AND constraints.constraint_name = keys.constraint_name
+WHERE constraints.table_schema IN (%s, %s)
+    AND constraints.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+GROUP BY constraints.table_schema, constraints.table_name, constraints.constraint_type
+ORDER BY constraints.table_schema, constraints.table_name, constraints.constraint_type"""
 
 _INSERT_ROW_SQL = (
     f"INSERT INTO {_CONSUMER} ({', '.join(_quote(column) for column in GOLD_COLUMNS)}) "
@@ -417,11 +509,27 @@ class PostgresGoldSyncRepository:
         try:
             cursor = connection.cursor()
             try:
-                cursor.execute(_CONSUMER_DDL)
-                for statement in _CONSUMER_COLUMN_MIGRATIONS:
-                    cursor.execute(statement)
-                cursor.execute(_SYNC_STATE_DDL)
-                cursor.execute(_ROW_HASH_DDL)
+                cursor.execute(_MIGRATION_LEDGER_DDL)
+                cursor.execute(f"SELECT version FROM {_MIGRATION_LEDGER} ORDER BY version")
+                applied_versions = tuple(
+                    _as_int(row[0], "migration version") for row in cursor.fetchall()
+                )
+                expected_versions = tuple(range(1, len(_MIGRATIONS) + 1))
+                if any(version not in expected_versions for version in applied_versions):
+                    raise ValueError(
+                        "PostgreSQL schema migration ledger contains an unknown version"
+                    )
+                for version, statements in enumerate(_MIGRATIONS, start=1):
+                    if version in applied_versions:
+                        continue
+                    for statement in statements:
+                        cursor.execute(statement)
+                    cursor.execute(
+                        f"INSERT INTO {_MIGRATION_LEDGER} (version, applied_at_utc) "
+                        "VALUES (%s, CURRENT_TIMESTAMP)",
+                        (version,),
+                    )
+                self._assert_schema_contract(cursor)
             finally:
                 cursor.close()
             connection.commit()
@@ -551,6 +659,7 @@ class PostgresGoldSyncRepository:
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(%s)", (_advisory_lock_key(dataset_id),)
                 )
+                self._assert_schema_contract(cursor)
                 for row in plan.inserts:
                     cursor.execute(_INSERT_ROW_SQL, _row_insert_params(row))
                 for row in plan.updates:
@@ -604,3 +713,64 @@ class PostgresGoldSyncRepository:
                 raise ValueError("duplicate source Gold digest timestamp")
             result[digest.timestamp_m1] = digest.row_sha256
         return result
+
+    @staticmethod
+    def _assert_schema_contract(cursor: CursorPort) -> None:
+        schemas = (POSTGRES_CONSUMER_SCHEMA, POSTGRES_SYNC_SCHEMA)
+        cursor.execute(_OWNED_TABLES_SQL, schemas)
+        actual_tables = tuple(
+            (_as_text(row[0], "table schema"), _as_text(row[1], "table name"))
+            for row in cursor.fetchall()
+        )
+        expected_tables = tuple(sorted((spec.schema, spec.name) for spec in _SCHEMA_SPECIFICATION))
+        if actual_tables != expected_tables:
+            raise ValueError("PostgreSQL owned table contract does not match specification")
+
+        cursor.execute(_OWNED_COLUMNS_SQL, schemas)
+        actual_columns: dict[tuple[str, str], list[PostgresColumnSpecification]] = {}
+        for row in cursor.fetchall():
+            if len(row) != 8:
+                raise ValueError("PostgreSQL column contract query returned unexpected width")
+            schema = _as_text(row[0], "column schema")
+            table = _as_text(row[1], "column table")
+            _as_int(row[2], "column ordinal position")
+            precision = row[5] if row[5] is not None else row[6]
+            if precision is not None:
+                precision = _as_int(precision, "column precision")
+            actual_columns.setdefault((schema, table), []).append(
+                PostgresColumnSpecification(
+                    _as_text(row[3], "column name"),
+                    _as_text(row[4], "column type"),
+                    precision,
+                    _as_text(row[7], "column nullability") == "YES",
+                )
+            )
+        for specification in _SCHEMA_SPECIFICATION:
+            if (
+                tuple(actual_columns.get((specification.schema, specification.name), ()))
+                != specification.columns
+            ):
+                raise ValueError("PostgreSQL column contract does not match specification")
+
+        cursor.execute(_OWNED_KEYS_SQL, schemas)
+        actual_keys: dict[tuple[str, str], tuple[str, ...]] = {}
+        for row in cursor.fetchall():
+            if len(row) != 4:
+                raise ValueError("PostgreSQL key contract query returned unexpected width")
+            if _as_text(row[2], "key type") != "PRIMARY KEY":
+                raise ValueError("PostgreSQL schema contains an unexpected unique key")
+            columns = row[3]
+            if not isinstance(columns, (list, tuple)) or not all(
+                isinstance(column, str) for column in columns
+            ):
+                raise TypeError("PostgreSQL key columns must be text")
+            key = (_as_text(row[0], "key schema"), _as_text(row[1], "key table"))
+            if key in actual_keys:
+                raise ValueError("PostgreSQL schema contains duplicate key constraints")
+            actual_keys[key] = tuple(columns)
+        expected_keys = {
+            (specification.schema, specification.name): specification.primary_key
+            for specification in _SCHEMA_SPECIFICATION
+        }
+        if actual_keys != expected_keys:
+            raise ValueError("PostgreSQL key contract does not match specification")
