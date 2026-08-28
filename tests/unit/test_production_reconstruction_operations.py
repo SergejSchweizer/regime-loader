@@ -109,6 +109,25 @@ def test_endpoint_preflight_rejects_a_connected_wrong_server(tmp_path: Path) -> 
         operations.preflight_endpoint()
 
 
+def test_locks_reject_postgres_contention_and_release_runner_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    operations = _operations(tmp_path)
+    connection = Connection((False,))
+    monkeypatch.setattr(module.psycopg, "connect", lambda **kwargs: connection)
+
+    with pytest.raises(RuntimeError, match="maintenance lock"):
+        operations.acquire_locks()
+
+    assert connection.closed
+    assert operations._runner_handle is None
+
+
+def test_endpoint_preflight_requires_held_maintenance_lock(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="not held"):
+        _operations(tmp_path).preflight_endpoint()
+
+
 def test_backup_snapshots_full_lake_and_private_database_dump(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -140,6 +159,32 @@ def test_backup_snapshots_full_lake_and_private_database_dump(
     assert (backup / "RESTORE.txt").is_file()
 
 
+def test_backup_rejects_missing_evidence_or_invalid_database_dump(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    operations = _operations(tmp_path)
+    monkeypatch.setattr(
+        module,
+        "select_current_sync_record",
+        lambda records: SimpleNamespace(data_path="data.parquet"),
+    )
+    with pytest.raises(RuntimeError, match="lake evidence"):
+        operations.validate_backup()
+
+    operations.lake_root.mkdir()
+    gold_root = operations.lake_root / "gold/dataset=regime_features_daily"
+    gold_root.mkdir(parents=True)
+    (gold_root / "manifest.parquet").write_text("catalog")
+    (gold_root / "data.parquet").write_text("data")
+    (operations.lake_root / "state").mkdir()
+    (operations.lake_root / "state/ingestion_state.parquet").write_text("state")
+    monkeypatch.setattr(
+        module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1)
+    )
+    with pytest.raises(RuntimeError, match="backup validation"):
+        operations.validate_backup()
+
+
 def test_operations_delegate_pipeline_sync_and_wrapper_without_payload_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -161,3 +206,17 @@ def test_operations_delegate_pipeline_sync_and_wrapper_without_payload_output(
         ("silver", ("vix",)),
         ("gold", None),
     ]
+
+
+def test_wrapper_failure_and_missing_marker_keep_scheduling_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    operations = _operations(tmp_path)
+    monkeypatch.setattr(
+        module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=4)
+    )
+
+    with pytest.raises(RuntimeError, match="wrapper verification"):
+        operations.verify_sunday_wrapper()
+    with pytest.raises(RuntimeError, match="marker is missing"):
+        operations.enable_scheduling()
