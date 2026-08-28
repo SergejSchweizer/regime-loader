@@ -78,14 +78,12 @@ def test_bootstrap_and_reconcile_are_max_history_without_start_bound() -> None:
         assert frame.height == 2
 
 
-def test_missing_blank_dot_non_numeric_and_nonfinite_values_are_absent() -> None:
+def test_documented_missing_values_remain_absent() -> None:
     content = fred_payload(
         [
             ("2026-08-11", "."),
             ("2026-08-12", ""),
             ("2026-08-13", None),
-            ("2026-08-14", "bad"),
-            ("2026-08-15", "nan"),
             ("2026-08-19", "3.5"),
         ]
     )
@@ -94,6 +92,18 @@ def test_missing_blank_dot_non_numeric_and_nonfinite_values_are_absent() -> None
     )
     assert frame.get_column("observation_date").to_list() == [END]
     assert frame.get_column("value").item() == 3.5
+
+
+@pytest.mark.parametrize(
+    "value, error",
+    [("bad", "invalid"), ("nan", "non-finite"), ("inf", "non-finite")],
+)
+def test_malformed_or_nonfinite_values_fail_closed(value: str, error: str) -> None:
+    content = fred_payload([("2026-08-19", value)])
+    provider = make_provider(FakeTransport(HttpResponse(200, content, {})))
+
+    with pytest.raises(ValueError, match=error):
+        provider.fetch(series_contract("us_10y"), update_request())
 
 
 @pytest.mark.parametrize(

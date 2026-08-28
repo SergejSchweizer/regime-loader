@@ -108,13 +108,19 @@ class EcbProvider:
             .cast(pl.String)
             .str.strptime(pl.Date, "%Y-%m-%d", strict=False)
             .alias("observation_date"),
-            pl.col("OBS_VALUE").cast(pl.Float64, strict=False).alias("value"),
+            pl.col("OBS_VALUE").cast(pl.String).str.strip_chars().alias("raw_value"),
         )
         if bool(frame.select(pl.col("observation_date").is_null().any()).item()):
             raise ValueError("ECB payload contains invalid observation dates")
         if bool(frame.select(pl.col("observation_date").is_duplicated().any()).item()):
             raise ValueError("ECB payload contains duplicate observation dates")
-        frame = frame.filter(pl.col("value").is_not_null() & pl.col("value").is_finite())
+        missing_value = pl.col("raw_value").is_null() | pl.col("raw_value").is_in(["", "."])
+        parsed_value = pl.col("raw_value").cast(pl.Float64, strict=False)
+        invalid_value = ~missing_value & (parsed_value.is_null() | ~parsed_value.is_finite())
+        if bool(frame.select(invalid_value.any()).item()):
+            raise ValueError("ECB payload contains invalid observation value")
+        frame = frame.filter(~missing_value).with_columns(parsed_value.alias("value"))
+        frame = frame.drop("raw_value")
         if not frame.height:
             return self._empty_frame()
         fetched_at = self._clock()
