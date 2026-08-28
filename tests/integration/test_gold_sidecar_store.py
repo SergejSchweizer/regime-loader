@@ -17,6 +17,7 @@ from ingestion.gold_sidecar_store import GoldSidecarStore, feature_profile_data
 START = datetime(2026, 8, 19, 2, tzinfo=UTC)
 GIT_SHA = "c" * 40
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+TEST_PNG = PNG_SIGNATURE + b"fast-test-renderer"
 
 
 def _frame() -> pl.DataFrame:
@@ -40,14 +41,21 @@ def _inputs() -> tuple[SilverInputSignature, ...]:
     )
 
 
-def _stores(tmp_path: Path, fault=None) -> tuple[LakePaths, GoldBuildStore, GoldSidecarStore]:
+def _stores(
+    tmp_path: Path,
+    fault=None,
+    *,
+    profile_renderer=None,
+) -> tuple[LakePaths, GoldBuildStore, GoldSidecarStore]:
     paths = LakePaths(tmp_path / "lake")
     build_store = GoldBuildStore(paths)
+    renderer_options = {} if profile_renderer is None else {"profile_renderer": profile_renderer}
     sidecar_store = GoldSidecarStore(
         paths,
         build_store,
         GoldSidecarBuilder(git_commit_hash=GIT_SHA),
         fault_injector=fault,
+        **renderer_options,
     )
     return paths, build_store, sidecar_store
 
@@ -102,8 +110,29 @@ def test_sidecar_bundle_is_creation_only_valid_and_deterministic(tmp_path: Path)
 
 
 @pytest.mark.integration
+def test_sidecar_store_rejects_non_png_injected_renderer(tmp_path: Path) -> None:
+    paths = LakePaths(tmp_path / "lake")
+    build_store = GoldBuildStore(paths)
+    sidecar_store = GoldSidecarStore(
+        paths,
+        build_store,
+        GoldSidecarBuilder(git_commit_hash=GIT_SHA),
+        profile_renderer=lambda frame: b"not a PNG",
+    )
+    artifact = build_store.create(_frame(), build_id="20260819T020000Z")
+
+    with pytest.raises(ValueError, match="must return a PNG"):
+        sidecar_store.create(
+            artifact,
+            started_at_utc=START,
+            completed_at_utc=START + timedelta(minutes=1),
+            inputs=_inputs(),
+        )
+
+
+@pytest.mark.integration
 def test_bundle_validation_rejects_data_manifest_and_png_mismatch(tmp_path: Path) -> None:
-    _, build_store, sidecar_store = _stores(tmp_path)
+    _, build_store, sidecar_store = _stores(tmp_path, profile_renderer=lambda frame: TEST_PNG)
     frame = _frame()
     artifact = build_store.create(frame, build_id="20260819T020000Z")
     sidecars = sidecar_store.create(
@@ -141,7 +170,11 @@ def test_sidecar_failure_leaves_incomplete_attempt_and_root_views_untouched(
         if stage == "after_plot_create":
             raise RuntimeError("injected sidecar failure")
 
-    paths, build_store, sidecar_store = _stores(tmp_path, fault=fail)
+    paths, build_store, sidecar_store = _stores(
+        tmp_path,
+        fault=fail,
+        profile_renderer=lambda frame: TEST_PNG,
+    )
     frame = _frame()
     artifact = build_store.create(frame, build_id="20260819T020000Z")
     paths.gold_dataset_root().mkdir(parents=True, exist_ok=True)

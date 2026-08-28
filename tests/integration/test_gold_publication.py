@@ -21,6 +21,7 @@ from ingestion.gold_sidecar_store import GoldSidecarStore
 
 START = datetime(2026, 8, 19, 2, tzinfo=UTC)
 GIT_SHA = "d" * 40
+TEST_PNG = b"\x89PNG\r\n\x1a\nfast-test-renderer"
 
 
 class SequenceClock:
@@ -77,6 +78,7 @@ def _stack(
         paths,
         build_store,
         GoldSidecarBuilder(git_commit_hash=GIT_SHA),
+        profile_renderer=lambda frame: TEST_PNG,
     )
     bundle = GoldBundleAdapter(
         paths,

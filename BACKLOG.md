@@ -2278,6 +2278,27 @@ Acceptance:
 - A1 (verifies R1): a non-main PR-branch push cannot trigger a duplicate `push` workflow alongside its `pull_request` workflow.
 - A2 (verifies R2): main pushes and merge-queue revisions retain all required quality gates without rerunning either test suite inside `coverage`.
 
+## PR-65: Accelerate Gold Integration Test Rendering
+
+PR name: `fast-gold-test-renderer`
+Status: In Progress
+Updated: 2026-08-28
+PR: none
+Git branch: `pr-65/fast-gold-test-renderer`
+Git status: `active-clean`
+Agent lane: Test infrastructure; one agent only
+Depends on: PR-40
+Commit: `perf(pr-65): inject fast Gold test renderer`
+Design patterns: Dependency Injection, Adapter.
+
+Description:
+- R1: Keep the production Gold profile renderer unchanged while allowing integration tests that do not inspect pixels to inject a deterministic valid PNG renderer.
+- R2: Preserve genuine Matplotlib rendering coverage in the dedicated sidecar integration test.
+
+Acceptance:
+- A1 (verifies R1): publication, retention, and daily E2E tests produce valid immutable PNG sidecars without constructing large plot figures.
+- A2 (verifies R2): the dedicated sidecar test continues to validate a genuine PNG render and malformed renderer output is rejected.
+
 ### Corrected Production Completion Gate
 
 The repository's earlier MVP and PR-31..PR-39 completion statements describe historical implementation milestones only. Production serving correctness is not certified until PR-41 through PR-60 are merged and PR-61 has completed the authoritative source reconcile, certified Gold rebuild, loader-owned PostgreSQL reconstruction, independent real-target verification, and zero-mutation replay with a sanitized `PASS` report. Until then, no existing PostgreSQL data should be treated as independently verified merely because unit/fake-adapter tests or count/min/max checks pass.
