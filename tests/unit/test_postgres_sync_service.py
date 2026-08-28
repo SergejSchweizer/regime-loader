@@ -130,10 +130,12 @@ class FakeRepository:
         *,
         state: GoldSyncState | None = None,
         digests: tuple[GoldRowDigest, ...] = (),
+        consumer_digests: tuple[GoldRowDigest, ...] | None = None,
         fail_apply: bool = False,
     ) -> None:
         self.state = state
         self.digests = digests
+        self.consumer_digests = digests if consumer_digests is None else consumer_digests
         self.fail_apply = fail_apply
         self.applied: list[tuple[GoldDeltaPlan, GoldSyncState]] = []
         self.events: list[str] = []
@@ -160,6 +162,11 @@ class FakeRepository:
         self.events.append("read target")
         return self.digests
 
+    def read_consumer_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]:
+        assert dataset_id == POSTGRES_DATASET_ID
+        self.events.append("read target")
+        return self.consumer_digests
+
     def apply_delta(
         self,
         dataset_id: str,
@@ -173,6 +180,7 @@ class FakeRepository:
         self.applied.append((plan, state))
         if plan.source_digests:
             self.digests = plan.source_digests
+            self.consumer_digests = plan.source_digests
         self.state = state
 
     def summary(self, dataset_id: str) -> GoldTargetSummary:
@@ -242,6 +250,7 @@ def test_sync_plans_and_applies_inside_locked_transaction(monkeypatch: pytest.Mo
         "lock",
         "read target",
         "read target",
+        "read target",
         "plan",
         "mutate",
         "verify",
@@ -267,7 +276,7 @@ def test_schema_preflight_fails_before_locked_row_mutation() -> None:
     assert repository.applied == []
 
 
-def test_same_data_advances_checkpoint_without_gold_or_digest_row_mutations() -> None:
+def test_same_data_verifies_complete_consumer_and_digest_state_before_checkpoint() -> None:
     frame = _frame((0, 1, 2))
     _, digests = source_rows_and_digests(frame)
     repository = FakeRepository(state=_state(frame, data_sha256="b" * 64), digests=digests)
@@ -277,9 +286,38 @@ def test_same_data_advances_checkpoint_without_gold_or_digest_row_mutations() ->
 
     assert (result.inserted, result.updated, result.deleted, result.unchanged) == (0, 0, 0, 3)
     plan, state = repository.applied[0]
-    assert (plan.inserts, plan.updates, plan.deletes, plan.source_digests) == ((), (), (), ())
+    assert (plan.inserts, plan.updates, plan.deletes) == ((), (), ())
+    assert plan.source_digests == digests
     assert state.source_build_id == "20260822T100000Z"
-    assert source.read_paths == []
+    assert source.read_paths == [_PATH]
+
+
+def test_tampered_consumer_digest_fails_before_state_advance() -> None:
+    frame = _frame((0, 1, 2))
+    _, digests = source_rows_and_digests(frame)
+    repository = FakeRepository(
+        state=_state(frame, data_sha256="b" * 64),
+        digests=digests,
+        consumer_digests=(GoldRowDigest(_ts(0), "f" * 64), *digests[1:]),
+    )
+    service, _ = _service(frame, repository, sha256="b" * 64)
+
+    with pytest.raises(GoldSyncVerificationError, match="consumer rows"):
+        service.sync()
+
+    assert repository.applied == []
+
+
+def test_stale_state_on_unchanged_rows_fails_before_state_advance() -> None:
+    frame = _frame((0, 1, 2))
+    _, digests = source_rows_and_digests(frame)
+    repository = FakeRepository(state=_state(frame, data_sha256="a" * 64), digests=digests)
+    service, _ = _service(frame, repository, sha256="b" * 64)
+
+    with pytest.raises(GoldSyncVerificationError, match="sync state"):
+        service.sync()
+
+    assert repository.applied == []
 
 
 def test_mixed_delta_is_exact_and_unchanged_rows_are_not_submitted() -> None:
@@ -324,6 +362,11 @@ def test_incompatible_or_inconsistent_target_fails_closed_before_write() -> None
     orphan = FakeRepository(digests=digests)
     service, _ = _service(frame, orphan)
     with pytest.raises(GoldSyncVerificationError, match="without authoritative"):
+        service.sync()
+
+    orphan_consumer = FakeRepository(consumer_digests=digests)
+    service, _ = _service(frame, orphan_consumer)
+    with pytest.raises(GoldSyncVerificationError, match="consumer rows exist"):
         service.sync()
 
     drift = FakeRepository(state=_state(frame), digests=digests[:1])

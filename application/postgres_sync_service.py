@@ -13,7 +13,7 @@ from application.gold_catalog import GoldCatalogRecord
 from application.postgres_delta import plan_gold_delta
 from application.postgres_sync import (
     POSTGRES_DATASET_ID,
-    GoldDeltaPlan,
+    GoldRowDigest,
     GoldSyncRepository,
     GoldSyncResult,
     GoldSyncState,
@@ -81,33 +81,36 @@ class GoldPostgresDeltaSync:
         prior_state = transaction.read_state(POSTGRES_DATASET_ID)
         self._require_state_compatible(prior_state, desired_state)
         target_digests = transaction.read_digests(POSTGRES_DATASET_ID)
+        consumer_digests = transaction.read_consumer_digests(POSTGRES_DATASET_ID)
         if prior_state is None and target_digests:
             raise GoldSyncVerificationError(
                 "PostgreSQL Gold digests exist without authoritative sync state"
+            )
+        if prior_state is None and consumer_digests:
+            raise GoldSyncVerificationError(
+                "PostgreSQL Gold consumer rows exist without authoritative sync state"
             )
         if prior_state is not None and len(target_digests) != prior_state.row_count:
             raise GoldSyncVerificationError(
                 "PostgreSQL Gold digest count does not match authoritative sync state"
             )
-
-        if prior_state is not None and self._same_data(prior_state, desired_state):
-            transaction.apply_delta(
-                POSTGRES_DATASET_ID,
-                GoldDeltaPlan((), (), (), (), ()),
-                desired_state,
-            )
-            return GoldSyncResult(
-                dataset_id=POSTGRES_DATASET_ID,
-                source_build_id=record.build_id,
-                inserted=0,
-                updated=0,
-                deleted=0,
-                unchanged=desired_state.row_count,
-            )
+        self._require_matching_digests(target_digests, consumer_digests, "consumer rows")
 
         frame = self.source.read_path(data_path)
         self._validate_frame_metadata(frame, record)
         plan = plan_gold_delta(frame, target_digests, prior_state)
+        if prior_state is not None and self._same_data(prior_state, desired_state):
+            self._require_matching_digests(plan.source_digests, target_digests, "digest index")
+        if (
+            prior_state is not None
+            and not plan.inserts
+            and not plan.updates
+            and not plan.deletes
+            and not self._same_data(prior_state, desired_state)
+        ):
+            raise GoldSyncVerificationError(
+                "PostgreSQL Gold sync state does not match canonical source"
+            )
         transaction.apply_delta(POSTGRES_DATASET_ID, plan, desired_state)
         return GoldSyncResult(
             dataset_id=POSTGRES_DATASET_ID,
@@ -185,6 +188,19 @@ class GoldPostgresDeltaSync:
             and prior.min_timestamp == desired.min_timestamp
             and prior.max_timestamp == desired.max_timestamp
         )
+
+    @staticmethod
+    def _require_matching_digests(
+        source: tuple[GoldRowDigest, ...],
+        target: tuple[GoldRowDigest, ...],
+        target_name: str,
+    ) -> None:
+        source_by_timestamp = {digest.timestamp_m1: digest.row_sha256 for digest in source}
+        target_by_timestamp = {digest.timestamp_m1: digest.row_sha256 for digest in target}
+        if source_by_timestamp != target_by_timestamp:
+            raise GoldSyncVerificationError(
+                f"PostgreSQL Gold {target_name} do not match canonical source"
+            )
 
     @staticmethod
     def _validate_frame_metadata(frame: pl.DataFrame, record: GoldCatalogRecord) -> None:
