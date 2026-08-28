@@ -143,6 +143,15 @@ role ownership and grants, UTC session settings, timeout/application identity, a
 microsecond timestamp probes. It returns a deterministic, sanitized `PASS|FAIL` report and cannot
 publish, synchronize, migrate, or create durable probe state.
 
+`postgres-reconstruct --execute` is a separate, explicitly authorized production command. Its
+application use case is fail-closed: maintenance marker, runner lock, PostgreSQL maintenance
+lock, exact endpoint probe, and validated private backup evidence precede all source or schema
+mutation. It invokes explicit reconciliation for all registered series, canonical Silver/Gold
+publication, controlled recreation of only the two loader-owned schemas, runtime publication,
+independent verification, and a zero-mutation replay. Only after every assertion passes may it
+remove the maintenance marker. Private backup and restore material never crosses the adapter
+boundary into a committed artifact; the sole source-controlled evidence is its deterministic,
+sanitized PASS report.
 ## Initial Series Registry
 
 Exactly these canonical series are in MVP:

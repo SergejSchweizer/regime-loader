@@ -100,7 +100,7 @@ def test_invalid_contract_update_and_clock_fail_deterministically() -> None:
     "payload, message",
     [
         (b"DATE,OPEN,HIGH,LOW\n08/19/2026,1,2,0\n", "missing required"),
-        (b"DATE,OPEN,HIGH,LOW,CLOSE\n08/19/2026,1,2,0,nan\n", "non-finite close"),
+        (b"DATE,OPEN,HIGH,LOW,CLOSE\n08/19/2026,1,2,0,nan\n", "no valid"),
         (
             b"DATE,OPEN,HIGH,LOW,CLOSE\n08/19/2026,1,2,0,1\n08/19/2026,2,3,1,2\n",
             "duplicate observation",
@@ -129,8 +129,17 @@ def test_ohlc_market_bar_invariants_are_rejected(bar: str, message: str) -> None
     payload = f"DATE,OPEN,HIGH,LOW,CLOSE\n08/19/2026,{bar}\n".encode()
     provider = CboeProvider(FakeTransport(HttpResponse(200, payload, {})), clock=lambda: NOW)
 
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(ValueError, match="no valid"):
         provider.fetch(series_contract("vix"), update_request())
+
+
+def test_invalid_source_bars_are_excluded_without_fabricating_replacements() -> None:
+    payload = b"DATE,OPEN,HIGH,LOW,CLOSE\n08/18/2026,20,21,19,20.5\n08/19/2026,20,19,18,20\n"
+    provider = CboeProvider(FakeTransport(HttpResponse(200, payload, {})), clock=lambda: NOW)
+
+    frame = provider.fetch(series_contract("vix"), update_request())
+
+    assert frame.get_column("observation_date").to_list() == [date(2026, 8, 18)]
 
 
 def test_source_unavailable_is_typed_and_safe() -> None:

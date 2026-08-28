@@ -13,3 +13,5 @@ htmlcov/
 .DS_Store
 lake/
 config.yaml
+artifacts/private/
+.locks/

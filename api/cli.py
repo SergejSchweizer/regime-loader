@@ -27,6 +27,7 @@ from application.postgres_conformance import PostgresConformanceVerifier
 from application.postgres_conformance_service import GoldPostgresConformanceVerifier
 from application.postgres_sync import GoldSchemaMigrator
 from application.postgres_sync_service import GoldPostgresDeltaSync
+from application.production_reconstruction import ProductionReconstruction
 from application.registry import SERIES_REGISTRY
 from ingestion.bronze_uow import FilesystemBronzeUnitOfWork
 from ingestion.cboe_provider import CboeProvider
@@ -47,9 +48,11 @@ from ingestion.postgres_conformance_verifier import PostgresLiveDatabaseConforma
 from ingestion.postgres_gold_repository import (
     PostgresAdminConfig,
     PostgresGoldSchemaMigrator,
+    PostgresGoldSchemaReconstructor,
     PostgresGoldSyncRepository,
     PostgresSyncConfig,
 )
+from ingestion.production_reconstruction_operations import GuardedProductionReconstructionOperations
 from ingestion.silver_repository import SilverSeriesRepository
 from ingestion.stoxx_provider import StoxxProvider
 from ingestion.yahoo_provider import YahooMoveProvider
@@ -63,6 +66,7 @@ _GOLD_COMMANDS = frozenset({"gold-build", "run-daily"})
 _POSTGRES_SYNC_COMMAND = "gold-sync-postgres"
 _POSTGRES_MIGRATE_COMMAND = "postgres-migrate"
 _POSTGRES_VERIFY_COMMAND = "postgres-verify"
+_POSTGRES_RECONSTRUCT_COMMAND = "postgres-reconstruct"
 _UNUSED_GIT_IDENTITY = "0" * 40
 
 
@@ -117,6 +121,11 @@ class PostgresVerificationRuntime:
     verifier: PostgresConformanceVerifier
 
 
+@dataclass(frozen=True, slots=True)
+class ProductionReconstructionRuntime:
+    reconstruction: ProductionReconstruction
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="regime-loader")
     parser.add_argument("--lake-root", type=Path, default=Path("lake"))
@@ -130,6 +139,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(_POSTGRES_SYNC_COMMAND)
     subparsers.add_parser(_POSTGRES_MIGRATE_COMMAND)
     subparsers.add_parser(_POSTGRES_VERIFY_COMMAND)
+    reconstruction = subparsers.add_parser(_POSTGRES_RECONSTRUCT_COMMAND)
+    reconstruction.add_argument("--execute", action="store_true")
     inventory = subparsers.add_parser("inventory")
     inventory.add_argument("--json", action="store_true", dest="as_json")
     inventory.add_argument("--series", action="append", default=[])
@@ -295,6 +306,53 @@ def build_postgres_verification_runtime(
     )
 
 
+def build_production_reconstruction_runtime(
+    *, lake_root: Path, today: date, stderr: TextIO
+) -> ProductionReconstructionRuntime:
+    runtime = build_runtime(
+        lake_root=lake_root,
+        command="run-daily",
+        series_ids=tuple(SERIES_REGISTRY),
+        overlap_days=7,
+        stderr=stderr,
+    )
+    runtime_config = PostgresSyncConfig.from_env()
+    admin_config = PostgresAdminConfig.from_env()
+    paths = LakePaths(lake_root)
+    build_store = GoldBuildStore(paths)
+    catalog = GoldCatalogRepository(paths.gold_manifest_parquet())
+    source = FilesystemGoldFrameSource(paths, build_store)
+    sync = GoldPostgresDeltaSync(
+        catalog=catalog,
+        source=source,
+        repository=PostgresGoldSyncRepository(runtime_config),
+        clock=lambda: datetime.now(UTC),
+    )
+    verifier = GoldPostgresConformanceVerifier(
+        catalog=catalog,
+        source=source,
+        repository=PostgresGoldSyncRepository(runtime_config),
+        inspector=PostgresLiveDatabaseConformanceInspector(runtime_config),
+    )
+    project_root = Path(os.environ.get("PROJECT_ROOT", Path.cwd())).resolve()
+    operations = GuardedProductionReconstructionOperations(
+        pipeline=runtime.pipeline,
+        sync=sync,
+        verifier=verifier,
+        reconstructor=PostgresGoldSchemaReconstructor(admin_config),
+        runtime_config=runtime_config,
+        admin_config=admin_config,
+        catalog=catalog,
+        lake_root=lake_root,
+        project_root=project_root,
+        today=today,
+        sunday_runner=project_root / "ops" / "run-regime-loader-sunday.sh",
+    )
+    return ProductionReconstructionRuntime(
+        reconstruction=ProductionReconstruction(operations, tuple(SERIES_REGISTRY))
+    )
+
+
 def _dispatch(
     runtime: Runtime,
     args: argparse.Namespace,
@@ -370,6 +428,21 @@ def _dispatch_postgres_verification(
     return EXIT_SUCCESS if report.status == "PASS" else EXIT_PIPELINE
 
 
+def _dispatch_production_reconstruction(
+    runtime: ProductionReconstructionRuntime,
+    *,
+    acceptance_report: Path,
+    stdout: TextIO,
+) -> int:
+    report = runtime.reconstruction.run()
+    stdout.write(report.as_json() + "\n")
+    if report.status != "PASS":
+        return EXIT_PIPELINE
+    acceptance_report.parent.mkdir(parents=True, exist_ok=True)
+    acceptance_report.write_text(report.as_json() + "\n", encoding="ascii")
+    return EXIT_SUCCESS
+
+
 def _failure_event(
     stderr: TextIO,
     *,
@@ -421,6 +494,20 @@ def main(
         if command == _POSTGRES_VERIFY_COMMAND:
             return _dispatch_postgres_verification(
                 build_postgres_verification_runtime(lake_root=args.lake_root, stderr=error),
+                stdout=output,
+            )
+        if command == _POSTGRES_RECONSTRUCT_COMMAND:
+            if not args.execute:
+                raise ValueError("postgres-reconstruct requires --execute")
+            return _dispatch_production_reconstruction(
+                build_production_reconstruction_runtime(
+                    lake_root=args.lake_root,
+                    today=_today(args.today),
+                    stderr=error,
+                ),
+                acceptance_report=Path(
+                    "artifacts/acceptance/postgres-production-reconstruction-v2.json"
+                ),
                 stdout=output,
             )
         runtime = build_runtime(

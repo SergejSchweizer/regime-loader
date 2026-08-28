@@ -288,6 +288,7 @@ gold-build
 gold-sync-postgres
 postgres-migrate
 postgres-verify
+postgres-reconstruct
 inventory
 run-daily
 ```
@@ -339,6 +340,15 @@ and sync state, then separately inspects loader schema, ownership, runtime grant
 timeouts, application identity, and two UTC microsecond round trips. It rolls its transaction
 back, emits deterministic sanitized JSON only, and returns non-zero unless every check is `PASS`.
 
+`postgres-reconstruct --execute` is the one explicit production reconstruction command. It
+disables the Sunday runner, acquires its filesystem lock and a PostgreSQL maintenance lock,
+requires the exact production endpoint, validates private restore evidence before source
+reconciliation or schema recreation, then reconciles all canonical series, rebuilds Gold,
+recreates only the loader-owned PostgreSQL schemas, publishes, independently verifies, and
+requires a zero-mutation replay. Scheduling remains disabled on every failure. A successful run
+writes only the sanitized `artifacts/acceptance/postgres-production-reconstruction-v2.json`
+evidence file; database dumps, lake copies, checksums, and restore instructions remain under
+ignored `artifacts/private/`.
 ### Daily pipeline contract
 
 `run-daily` is deliberately **delta-only** for sources:
