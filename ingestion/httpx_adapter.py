@@ -77,6 +77,7 @@ class HttpxTransport:
 
     def send(self, request: HttpRequest, *, context: RequestContext) -> HttpResponse:
         safe_path = _safe_request_path(request.url)
+        transport_exhausted = False
         for attempt in range(1, self._retry_policy.max_attempts + 1):
             try:
                 response = self._client.request(
@@ -85,13 +86,10 @@ class HttpxTransport:
                     params=request.params,
                     headers=request.headers,
                 )
-            except httpx.TransportError as exc:
+            except httpx.TransportError:
                 if attempt >= self._retry_policy.max_attempts:
-                    raise ProviderHttpError(
-                        context=context,
-                        category="transport_exhausted",
-                        request_path=safe_path,
-                    ) from exc
+                    transport_exhausted = True
+                    break
                 self._sleeper(self._retry_policy.delay_after(attempt))
                 continue
 
@@ -117,4 +115,10 @@ class HttpxTransport:
                 headers=dict(response.headers),
             )
 
+        if transport_exhausted:
+            raise ProviderHttpError(
+                context=context,
+                category="transport_exhausted",
+                request_path=safe_path,
+            ) from None
         raise AssertionError("retry loop exhausted without terminal result")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import traceback
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -189,12 +190,23 @@ def test_transport_error_retries_then_raises_sanitized_error() -> None:
     )
     with pytest.raises(ProviderHttpError) as captured:
         transport.send(request, context=CONTEXT)
-    message = str(captured.value)
-    assert captured.value.category == "transport_exhausted"
+    error = captured.value
+    rendered_error = "\n".join(
+        [
+            str(error),
+            repr(error),
+            "".join(traceback.format_exception(error)),
+            repr(error.__cause__),
+            repr(error.__context__),
+        ]
+    )
+    assert error.category == "transport_exhausted"
     assert sleeps == [0.25]
-    assert "https://example.test/data" in message
+    assert "https://example.test/data" in rendered_error
+    assert error.__cause__ is None
+    assert error.__context__ is None
     for secret in ("SECRET", "HIDDEN", "password", "ALSO-SECRET", "DO-NOT-LEAK"):
-        assert secret not in message
+        assert secret not in rendered_error
     transport.close()
 
 
