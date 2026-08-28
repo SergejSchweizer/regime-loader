@@ -2062,11 +2062,11 @@ Acceptance:
 ## PR-56: Harden The Runtime PostgreSQL Role To DML-Only
 
 PR name: `postgres-runtime-role-hardening`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: #63
 Git branch: `pr-56/postgres-runtime-role-hardening`
-Git status: `not-started (branch absent)`
+Git status: `pushed-ci-failing`
 Agent lane: PostgreSQL security; one agent only
 Depends on: PR-55
 Commit: `fix(pr-56): harden postgres runtime role`

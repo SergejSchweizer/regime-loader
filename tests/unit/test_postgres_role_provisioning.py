@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from scripts.provision_postgres_role import (
     POSTGRES_HOST,
+    POSTGRES_OWNER_ROLE,
     POSTGRES_PORT,
     POSTGRES_ROLE,
     POSTGRES_SCHEMAS,
+    POSTGRES_TABLES,
     ProvisioningConfig,
     provision_sql,
     psql_command,
@@ -33,8 +35,9 @@ def test_exact_endpoint_and_repository_role() -> None:
 
 
 def test_sql_is_least_privilege_and_schema_scoped() -> None:
-    sql = provision_sql("quant_data", "repo-secret")
+    sql = provision_sql("quant_data", "repo-secret", "postgres-admin")
     assert 'CREATE ROLE "regime-loader"' in sql
+    assert f'CREATE ROLE "{POSTGRES_OWNER_ROLE}" NOLOGIN' in sql
     for token in (
         "LOGIN PASSWORD",
         "NOSUPERUSER",
@@ -45,18 +48,35 @@ def test_sql_is_least_privilege_and_schema_scoped() -> None:
     ):
         assert token in sql
     assert POSTGRES_SCHEMAS == ("regime_loader", "regime_loader_sync")
-    assert 'CREATE SCHEMA IF NOT EXISTS "regime_loader"' in sql
-    assert 'CREATE SCHEMA IF NOT EXISTS "regime_loader_sync"' in sql
+    assert (
+        f'CREATE SCHEMA IF NOT EXISTS "regime_loader" AUTHORIZATION "{POSTGRES_OWNER_ROLE}"' in sql
+    )
+    assert (
+        f'CREATE SCHEMA IF NOT EXISTS "regime_loader_sync" AUTHORIZATION "{POSTGRES_OWNER_ROLE}"'
+        in sql
+    )
+    assert 'REVOKE CREATE ON SCHEMA "regime_loader" FROM "regime-loader"' in sql
+    assert 'GRANT USAGE ON SCHEMA "regime_loader" TO "regime-loader"' in sql
+    assert "GRANT USAGE, CREATE" not in sql
+    for schema, table in POSTGRES_TABLES[:-1]:
+        assert (
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "{schema}"."{table}" TO "regime-loader"'
+            in sql
+        )
+    assert (
+        'GRANT SELECT ON TABLE "regime_loader_sync"."schema_migrations" TO "regime-loader"' in sql
+    )
     assert "GRANT ALL" not in sql
     assert "public" not in {schema.lower() for schema in POSTGRES_SCHEMAS}
 
 
 def test_sql_is_idempotent_and_fails_on_incompatible_existing_state() -> None:
-    sql = provision_sql("quant_data", "repo-secret")
+    sql = provision_sql("quant_data", "repo-secret", "postgres-admin")
     assert "IF NOT EXISTS (SELECT 1 FROM pg_roles" in sql
     assert "CREATE SCHEMA IF NOT EXISTS" in sql
     assert "existing regime-loader role has incompatible privileges" in sql
-    assert "schema ownership is incompatible" in sql
+    assert f'ALTER SCHEMA "regime_loader" OWNER TO "{POSTGRES_OWNER_ROLE}"' in sql
+    assert f'ALTER DEFAULT PRIVILEGES FOR ROLE "{POSTGRES_OWNER_ROLE}"' in sql
 
 
 def test_admin_and_application_passwords_must_be_distinct() -> None:

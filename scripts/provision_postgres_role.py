@@ -11,7 +11,14 @@ from dataclasses import dataclass
 POSTGRES_HOST = "10.10.1.3"
 POSTGRES_PORT = 54321
 POSTGRES_ROLE = "regime-loader"
+POSTGRES_OWNER_ROLE = "regime-loader-owner"
 POSTGRES_SCHEMAS = ("regime_loader", "regime_loader_sync")
+POSTGRES_TABLES = (
+    ("regime_loader", "regime_features_daily"),
+    ("regime_loader_sync", "gold_sync_state"),
+    ("regime_loader_sync", "gold_row_hashes"),
+    ("regime_loader_sync", "schema_migrations"),
+)
 
 
 def _identifier(value: str) -> str:
@@ -22,6 +29,10 @@ def _identifier(value: str) -> str:
 
 def _literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _table_identifier(schema: str, table: str) -> str:
+    return f"{_identifier(schema)}.{_identifier(table)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,25 +71,47 @@ class ProvisioningConfig:
         return cls(host, port, database, admin_user, admin_password, app_password)
 
 
-def provision_sql(database: str, app_password: str) -> str:
+def provision_sql(database: str, app_password: str, admin_user: str) -> str:
     """Return idempotent fail-closed DDL without exposing administrator credentials."""
     role_i = _identifier(POSTGRES_ROLE)
     role_l = _literal(POSTGRES_ROLE)
+    owner_i = _identifier(POSTGRES_OWNER_ROLE)
+    owner_l = _literal(POSTGRES_OWNER_ROLE)
+    admin_i = _identifier(admin_user)
     database_i = _identifier(database)
     password_l = _literal(app_password)
     schemas = "\n".join(
-        f"CREATE SCHEMA IF NOT EXISTS {_identifier(schema)} AUTHORIZATION {role_i};\n"
+        f"CREATE SCHEMA IF NOT EXISTS {_identifier(schema)} AUTHORIZATION {owner_i};\n"
+        f"ALTER SCHEMA {_identifier(schema)} OWNER TO {owner_i};\n"
         f"REVOKE ALL ON SCHEMA {_identifier(schema)} FROM PUBLIC;\n"
-        f"GRANT USAGE, CREATE ON SCHEMA {_identifier(schema)} TO {role_i};"
+        f"REVOKE CREATE ON SCHEMA {_identifier(schema)} FROM {role_i};\n"
+        f"GRANT USAGE ON SCHEMA {_identifier(schema)} TO {role_i};"
         for schema in POSTGRES_SCHEMAS
     )
-    ownership_checks = " OR ".join(
-        "EXISTS (SELECT 1 FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner "
-        f"WHERE n.nspname={_literal(schema)} AND r.rolname<>{role_l})"
+    table_ownership = "\n".join(
+        f"ALTER TABLE IF EXISTS {_table_identifier(schema, table)} OWNER TO {owner_i};"
+        for schema, table in POSTGRES_TABLES
+    )
+    table_grants = (
+        "\n".join(
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
+            f"{_table_identifier(schema, table)} TO {role_i};"
+            for schema, table in POSTGRES_TABLES[:-1]
+        )
+        + f"\nGRANT SELECT ON TABLE {_table_identifier(*POSTGRES_TABLES[-1])} TO {role_i};"
+    )
+    default_privileges = "\n".join(
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_i} IN SCHEMA {_identifier(schema)} "
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role_i};\n"
+        f"ALTER DEFAULT PRIVILEGES FOR ROLE {admin_i} IN SCHEMA {_identifier(schema)} "
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {role_i};"
         for schema in POSTGRES_SCHEMAS
     )
     return f"""DO $provision$
 BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {owner_l}) THEN
+        CREATE ROLE {owner_i} NOLOGIN;
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {role_l}) THEN
         CREATE ROLE {role_i}
             LOGIN PASSWORD {password_l}
@@ -98,15 +131,13 @@ END
 $provision$;
 
 GRANT CONNECT ON DATABASE {database_i} TO {role_i};
+GRANT {owner_i} TO {admin_i};
 {schemas}
-
-DO $verify$
-BEGIN
-    IF {ownership_checks} THEN
-        RAISE EXCEPTION 'regime-loader schema ownership is incompatible';
-    END IF;
-END
-$verify$;
+{table_ownership}
+REVOKE ALL ON ALL TABLES IN SCHEMA "regime_loader" FROM {role_i};
+REVOKE ALL ON ALL TABLES IN SCHEMA "regime_loader_sync" FROM {role_i};
+{table_grants}
+{default_privileges}
 """
 
 
@@ -140,7 +171,7 @@ def run(config: ProvisioningConfig) -> None:
     environment["PGPASSWORD"] = config.admin_password
     completed = subprocess.run(
         psql_command(config),
-        input=provision_sql(config.database, config.app_password),
+        input=provision_sql(config.database, config.app_password, config.admin_user),
         text=True,
         capture_output=True,
         env=environment,
