@@ -1970,11 +1970,11 @@ Acceptance:
 ## PR-52: Verify Immutable Gold Bundle Integrity Before PostgreSQL Sync
 
 PR name: `postgres-gold-bundle-integrity`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: none
 Git branch: `pr-52/postgres-gold-bundle-integrity`
-Git status: `not-started (branch absent)`
+Git status: `active-clean`
 Agent lane: Gold/PostgreSQL boundary; one weak agent
 Depends on: PR-51
 Commit: `fix(pr-52): verify gold bundle before postgres sync`
