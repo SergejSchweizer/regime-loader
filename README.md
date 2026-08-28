@@ -371,6 +371,8 @@ Runtime sync first performs a read-only schema-contract preflight. Missing or in
 
 Schema migration is an explicit, separately authorized `postgres-migrate` operation. It requires the protected admin-only environment variables `MARKET_REGIME_POSTGRES_ADMIN_HOST`, `MARKET_REGIME_POSTGRES_ADMIN_PORT`, `MARKET_REGIME_POSTGRES_ADMIN_USER`, `MARKET_REGIME_POSTGRES_ADMIN_DATABASE`, and `MARKET_REGIME_POSTGRES_ADMIN_PASSWORD`. The admin user and password are distinct from the runtime role/credential and are never exported by the normal cron configuration.
 
+The `regime-loader` runtime role is a non-owning LOGIN principal. It has schema `USAGE`, DML only on the loader-owned consumer and sync tables, and read-only access to the migration ledger; it cannot create schemas or objects, change grants, or access unrelated schemas. The admin-managed `regime-loader-owner` role owns loader schemas and tables without LOGIN capability.
+
 Do not commit either credential set as a connection string. Deployment configuration lives in ignored `config.yaml`. `scripts/export_cron_config.py config.yaml` validates the exact runtime host, port, and role and exports shell-safe runtime `PG*`, lake, project, mirror, FRED, and logging variables only.
 
 The canonical main log is enforced as:

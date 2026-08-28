@@ -30,6 +30,7 @@ from ingestion.postgres_gold_repository import (
     PostgresSyncConfig,
     PostgresTimeoutPolicy,
 )
+from scripts.provision_postgres_role import provision_sql
 
 pytestmark = pytest.mark.xdist_group("postgres-real")
 
@@ -299,3 +300,53 @@ def test_real_postgres_schema_drift_fails_closed_before_sync(
         postgres_module.PostgresGoldRepositoryError, match="schema preflight failed"
     ):
         repository.preflight_schema()
+
+
+@pytest.mark.integration
+def test_real_postgres_runtime_role_is_dml_only(postgres_dsn: str) -> None:
+    with psycopg.connect(postgres_dsn) as admin_connection:
+        admin_connection.execute(
+            provision_sql("regime_loader_test", "runtime-secret", "regime_loader_test")
+        )
+        admin_connection.execute('CREATE ROLE "runtime-grant-probe" NOLOGIN')
+        admin_connection.execute("CREATE SCHEMA unrelated")
+        admin_connection.execute("CREATE TABLE unrelated.private_data (id INTEGER)")
+        admin_connection.commit()
+
+    runtime_dsn = postgres_dsn.replace(
+        "regime_loader_test:regime_loader_test", "regime-loader:runtime-secret"
+    )
+    with psycopg.connect(runtime_dsn) as runtime_connection:
+        runtime_connection.execute("SELECT * FROM regime_loader_sync.schema_migrations")
+        runtime_connection.execute("DELETE FROM regime_loader_sync.gold_sync_state")
+        runtime_connection.rollback()
+        for operation, statement in (
+            ("CREATE", "CREATE TABLE regime_loader.forbidden (id INTEGER)"),
+            (
+                "ALTER",
+                "ALTER TABLE regime_loader.regime_features_daily ADD COLUMN forbidden INTEGER",
+            ),
+            ("DROP", "DROP TABLE regime_loader.regime_features_daily"),
+            ("unrelated SELECT", "SELECT * FROM unrelated.private_data"),
+        ):
+            try:
+                runtime_connection.execute(statement)
+            except psycopg.errors.InsufficientPrivilege:
+                pass
+            else:
+                pytest.fail(f"runtime role unexpectedly permitted {operation}")
+            finally:
+                runtime_connection.rollback()
+
+        runtime_connection.execute(
+            'GRANT SELECT ON regime_loader.regime_features_daily TO "runtime-grant-probe"'
+        )
+        grant_result = runtime_connection.execute(
+            "SELECT has_table_privilege("
+            "'runtime-grant-probe', "
+            "'regime_loader.regime_features_daily', "
+            "'SELECT'"
+            ")"
+        )
+        assert grant_result.fetchone() == (False,)
+        runtime_connection.rollback()
