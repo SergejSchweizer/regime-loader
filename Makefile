@@ -1,4 +1,5 @@
 PYTHON ?= python
+TEST_WORKERS ?= 4
 COVERAGE_UNIT := .coverage.unit
 COVERAGE_INTEGRATION := .coverage.integration
 
@@ -13,10 +14,10 @@ type:
 	mypy application ingestion api scripts
 
 unit:
-	COVERAGE_FILE=$(COVERAGE_UNIT) pytest tests/unit -m "not network" --cov=application --cov=ingestion --cov=api --cov=scripts --cov-report=
+	COVERAGE_FILE=$(COVERAGE_UNIT) pytest -n $(TEST_WORKERS) tests/unit -m "not network" --cov=application --cov=ingestion --cov=api --cov=scripts --cov-report=
 
 integration:
-	COVERAGE_FILE=$(COVERAGE_INTEGRATION) pytest tests/integration -m "integration and not network" --cov=application --cov=ingestion --cov=api --cov=scripts --cov-report=
+	COVERAGE_FILE=$(COVERAGE_INTEGRATION) pytest -n $(TEST_WORKERS) tests/integration -m "integration and not network" --cov=application --cov=ingestion --cov=api --cov=scripts --cov-report=
 
 coverage:
 	@test -f $(COVERAGE_UNIT)
