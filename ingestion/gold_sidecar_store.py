@@ -27,6 +27,7 @@ from application.paths import LakePaths
 from ingestion.gold_build_store import GoldBuildArtifact, GoldBuildStore
 
 FaultInjector = Callable[[str], None]
+ProfileRenderer = Callable[[pl.DataFrame], bytes]
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -171,11 +172,13 @@ class GoldSidecarStore:
         builder: GoldSidecarBuilder,
         *,
         fault_injector: FaultInjector | None = None,
+        profile_renderer: ProfileRenderer = _profile_png,
     ) -> None:
         self._paths = paths
         self._build_store = build_store
         self._builder = builder
         self._fault = fault_injector if fault_injector is not None else _no_fault
+        self._profile_renderer = profile_renderer
 
     def create(
         self,
@@ -192,7 +195,9 @@ class GoldSidecarStore:
         if manifest_path.exists() or plot_path.exists():
             raise FileExistsError(f"Gold sidecars already exist for build {artifact.build_id}")
         frame = self._validated_frame(artifact)
-        plot_bytes = _profile_png(frame)
+        plot_bytes = self._profile_renderer(frame)
+        if not plot_bytes.startswith(_PNG_SIGNATURE):
+            raise ValueError("Gold feature profile renderer must return a PNG")
         self._fault("after_plot_bytes")
         _create_bytes(plot_path, plot_bytes)
         self._fault("after_plot_create")

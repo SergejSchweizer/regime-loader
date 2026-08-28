@@ -152,6 +152,7 @@ def _stack(
         paths,
         build_store,
         GoldSidecarBuilder(git_commit_hash=GIT_SHA),
+        profile_renderer=lambda frame: b"\x89PNG\r\n\x1a\nfast-test-renderer",
     )
     bundle = GoldBundleAdapter(
         paths,
