@@ -11,6 +11,7 @@ import pytest
 from api import cli
 from application.gold_frame import GOLD_COLUMNS
 from application.paths import LakePaths
+from application.postgres_conformance import PostgresConformanceReport
 from application.postgres_sync import GoldSyncResult
 from ingestion.gold_build_store import GoldBuildStore
 from ingestion.gold_sync_source import FilesystemGoldFrameSource
@@ -231,3 +232,28 @@ def test_postgres_failure_is_nonzero_and_redacts_password_and_credential_text(
     assert payload["command"] == "gold-sync-postgres"
     assert payload["stage"] == "pipeline"
     assert payload["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("status", "exit_code"), (("PASS", cli.EXIT_SUCCESS), ("FAIL", cli.EXIT_PIPELINE))
+)
+def test_postgres_verification_command_writes_only_deterministic_report(
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    exit_code: int,
+) -> None:
+    stdout = io.StringIO()
+
+    class VerifierStub:
+        def verify(self) -> PostgresConformanceReport:
+            return PostgresConformanceReport(status, ("consumer", "schema"), {"row_count": 1})
+
+    runtime = cli.PostgresVerificationRuntime(verifier=VerifierStub())
+    monkeypatch.setattr(cli, "build_postgres_verification_runtime", lambda **kwargs: runtime)
+
+    assert cli.main(["postgres-verify"], stdout=stdout, stderr=io.StringIO()) == exit_code
+    assert stdout.getvalue() == (
+        f'{{"checks": ["consumer", "schema"], "status": "{status}", '
+        '"summaries": {"row_count": 1}, '
+        '"temporal_contract_version": "pg-temporal-v1"}\n'
+    )

@@ -14,6 +14,8 @@ import pytest
 import ingestion.postgres_gold_repository as postgres_module
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
 from application.gold_frame import GOLD_COLUMNS
+from application.postgres_conformance import PostgresConformanceReport
+from application.postgres_conformance_service import GoldPostgresConformanceVerifier
 from application.postgres_sync import (
     POSTGRES_CONSUMER_SCHEMA,
     POSTGRES_CONSUMER_TABLE,
@@ -25,6 +27,7 @@ from application.postgres_sync import (
     GoldSyncTransaction,
 )
 from application.postgres_sync_service import GoldPostgresDeltaSync
+from ingestion.postgres_conformance_verifier import PostgresLiveDatabaseConformanceInspector
 from ingestion.postgres_gold_repository import (
     PostgresAdminConfig,
     PostgresGoldSchemaMigrator,
@@ -107,6 +110,26 @@ def _gold_frame(timestamp: datetime) -> pl.DataFrame:
     return pl.DataFrame(data).with_columns(pl.col("timestamp_m1").cast(pl.Datetime("us", "UTC")))
 
 
+def _record(timestamp: datetime) -> GoldCatalogRecord:
+    return GoldCatalogRecord(
+        dataset_id=POSTGRES_DATASET_ID,
+        build_id="20260828T000000Z",
+        status=GoldBuildStatus.COMPLETE,
+        current=True,
+        started_at_utc=_timestamp(1),
+        completed_at_utc=_timestamp(2),
+        schema_version=2,
+        feature_version=1,
+        min_timestamp=timestamp,
+        max_timestamp=timestamp,
+        row_count=1,
+        data_path="versions/build_id=20260828T000000Z/data.parquet",
+        build_manifest_path="versions/build_id=20260828T000000Z/manifest.json",
+        plot_path="versions/build_id=20260828T000000Z/feature_profile.png",
+        pruned_at_utc=None,
+    )
+
+
 class _Catalog:
     def __init__(self, record: GoldCatalogRecord) -> None:
         self._record = record
@@ -135,28 +158,87 @@ def _sync_service(
     repository: PostgresGoldSyncRepository, timestamp: datetime
 ) -> GoldPostgresDeltaSync:
     frame = _gold_frame(timestamp)
-    record = GoldCatalogRecord(
-        dataset_id=POSTGRES_DATASET_ID,
-        build_id="20260828T000000Z",
-        status=GoldBuildStatus.COMPLETE,
-        current=True,
-        started_at_utc=_timestamp(1),
-        completed_at_utc=_timestamp(2),
-        schema_version=2,
-        feature_version=1,
-        min_timestamp=timestamp,
-        max_timestamp=timestamp,
-        row_count=1,
-        data_path="versions/build_id=20260828T000000Z/data.parquet",
-        build_manifest_path="versions/build_id=20260828T000000Z/manifest.json",
-        plot_path="versions/build_id=20260828T000000Z/feature_profile.png",
-        pruned_at_utc=None,
-    )
+    record = _record(timestamp)
     return GoldPostgresDeltaSync(
         catalog=_Catalog(record),
         source=_Source(frame),
         repository=repository,
         clock=lambda: _timestamp(28),
+    )
+
+
+@pytest.mark.integration
+def test_real_postgres_independent_conformance_verifier_passes(
+    repository: PostgresGoldSyncRepository,
+    migrator: PostgresGoldSchemaMigrator,
+    postgres_dsn: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migrator.migrate()
+    with psycopg.connect(postgres_dsn) as connection:
+        connection.execute(
+            provision_sql("regime_loader_test", "runtime-secret", "regime_loader_test")
+        )
+        connection.commit()
+    timestamp = _timestamp(20)
+    assert _sync_service(repository, timestamp).sync().inserted == 1
+
+    monkeypatch.setattr(postgres_module, "POSTGRES_USER", "regime-loader")
+    runtime_config = PostgresSyncConfig(
+        "localhost", 5432, "regime-loader", "regime_loader_test", "runtime-secret"
+    )
+    inspector = PostgresLiveDatabaseConformanceInspector(
+        runtime_config,
+        connection_factory=lambda _: psycopg.connect(
+            postgres_dsn.replace(
+                "regime_loader_test:regime_loader_test", "regime-loader:runtime-secret"
+            )
+        ),
+    )
+    with psycopg.connect(
+        postgres_dsn.replace(
+            "regime_loader_test:regime_loader_test", "regime-loader:runtime-secret"
+        )
+    ) as connection:
+        cursor = connection.cursor()
+        try:
+            for statement in postgres_module._session_configuration(runtime_config.timeout_policy):
+                cursor.execute(statement)
+            cursor.execute("SET TRANSACTION READ ONLY")
+            inspector._assert_schema(cursor)
+            inspector._assert_roles(cursor)
+            inspector._assert_session(cursor)
+            inspector._assert_temporal_round_trips(cursor)
+        finally:
+            cursor.close()
+            connection.rollback()
+    verifier = GoldPostgresConformanceVerifier(
+        catalog=_Catalog(_record(timestamp)),
+        source=_Source(_gold_frame(timestamp)),
+        repository=repository,
+        inspector=inspector,
+    )
+
+    assert verifier.verify() == PostgresConformanceReport(
+        "PASS",
+        (
+            "consumer",
+            "digest_index",
+            "roles",
+            "schema",
+            "session",
+            "source",
+            "state",
+            "summary",
+            "temporal",
+        ),
+        {
+            "consumer_row_count": 1,
+            "digest_row_count": 1,
+            "role_count": 2,
+            "schema_table_count": 4,
+            "temporal_probe_count": 2,
+        },
     )
 
 

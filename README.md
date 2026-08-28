@@ -287,6 +287,7 @@ silver-build
 gold-build
 gold-sync-postgres
 postgres-migrate
+postgres-verify
 inventory
 run-daily
 ```
@@ -319,6 +320,11 @@ uv run regime-loader \
 # Explicitly apply PostgreSQL schema migrations with protected admin credentials.
 uv run regime-loader postgres-migrate
 
+# Independently verify the current Gold bundle and PostgreSQL serving replica.
+uv run regime-loader \
+  --lake-root /srv/market-regime/lake \
+  postgres-verify
+
 # Rebuild and print the local inventory.
 uv run regime-loader \
   --lake-root /srv/market-regime/lake \
@@ -326,6 +332,12 @@ uv run regime-loader \
 ```
 
 `gold-sync-postgres` is intentionally independent of `run-daily`: it does not construct provider clients and does not execute Bronze, Silver, Gold build/publication, mirror, retention, or source reconciliation. This makes a failed database synchronization safely retryable without rebuilding canonical Gold.
+
+`postgres-verify` is a read-mostly, independent serving-plane check. It verifies the current
+certified Gold bundle against actual consumer rows, consumer-derived digests, the hash index,
+and sync state, then separately inspects loader schema, ownership, runtime grants, UTC session,
+timeouts, application identity, and two UTC microsecond round trips. It rolls its transaction
+back, emits deterministic sanitized JSON only, and returns non-zero unless every check is `PASS`.
 
 ### Daily pipeline contract
 
@@ -368,6 +380,9 @@ PGPASSWORD=<repository-specific secret>
 ```
 
 Runtime sync first performs a read-only schema-contract preflight. Missing or incompatible PR-54 tables, columns, or keys fail before it acquires the row-mutation transaction. It never creates, alters, drops, grants, or migrates PostgreSQL objects.
+
+`postgres-verify` uses the same strictly validated runtime `PG*` endpoint configuration. It does
+not run the synchronization mutation path and does not create durable probe rows or objects.
 
 Schema migration is an explicit, separately authorized `postgres-migrate` operation. It requires the protected admin-only environment variables `MARKET_REGIME_POSTGRES_ADMIN_HOST`, `MARKET_REGIME_POSTGRES_ADMIN_PORT`, `MARKET_REGIME_POSTGRES_ADMIN_USER`, `MARKET_REGIME_POSTGRES_ADMIN_DATABASE`, and `MARKET_REGIME_POSTGRES_ADMIN_PASSWORD`. The admin user and password are distinct from the runtime role/credential and are never exported by the normal cron configuration.
 
