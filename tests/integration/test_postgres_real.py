@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import UTC, datetime
 from threading import Event, Thread
 
@@ -21,7 +22,14 @@ from application.postgres_sync import (
     GoldSyncState,
     GoldSyncTransaction,
 )
-from ingestion.postgres_gold_repository import PostgresGoldSyncRepository, PostgresSyncConfig
+from ingestion.postgres_gold_repository import (
+    PostgresGoldSyncRepository,
+    PostgresLockContentionError,
+    PostgresSyncConfig,
+    PostgresTimeoutPolicy,
+)
+
+pytestmark = pytest.mark.xdist_group("postgres-real")
 
 _ROLLBACK_STATE_SQL = """
 INSERT INTO regime_loader_sync.gold_sync_state (
@@ -181,3 +189,67 @@ def test_real_postgres_second_locked_transaction_reads_committed_state(
     assert not second.is_alive()
     assert failures == []
     assert observed_states == [state]
+
+
+@pytest.mark.integration
+def test_real_postgres_session_timeouts_bound_lock_and_statement(
+    postgres_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with psycopg.connect(postgres_dsn, autocommit=True) as connection:
+        connection.execute("DROP SCHEMA IF EXISTS regime_loader_sync CASCADE")
+        connection.execute("DROP SCHEMA IF EXISTS regime_loader CASCADE")
+        connection.execute("CREATE SCHEMA regime_loader")
+        connection.execute("CREATE SCHEMA regime_loader_sync")
+    monkeypatch.setattr(postgres_module, "POSTGRES_HOST", "localhost")
+    monkeypatch.setattr(postgres_module, "POSTGRES_PORT", 5432)
+    monkeypatch.setattr(postgres_module, "POSTGRES_USER", "regime_loader_test")
+    policy = PostgresTimeoutPolicy(
+        connect_timeout_seconds=5,
+        lock_timeout_ms=200,
+        statement_timeout_ms=500,
+        idle_in_transaction_timeout_ms=500,
+    )
+    repository = PostgresGoldSyncRepository(
+        PostgresSyncConfig(
+            "localhost",
+            5432,
+            "regime_loader_test",
+            "regime_loader_test",
+            "regime_loader_test",
+            policy,
+        )
+    )
+    repository.ensure_schema()
+
+    session = repository._open()
+    try:
+        cursor = session.cursor()
+        try:
+            assert cursor.execute("SHOW application_name").fetchone() == ("regime-loader",)
+            assert cursor.execute("SHOW lock_timeout").fetchone() == ("200ms",)
+            assert cursor.execute("SHOW statement_timeout").fetchone() == ("500ms",)
+            assert cursor.execute("SHOW idle_in_transaction_session_timeout").fetchone() == (
+                "500ms",
+            )
+            started = time.monotonic()
+            with pytest.raises(psycopg.errors.QueryCanceled):
+                cursor.execute("SELECT pg_sleep(1)")
+            assert time.monotonic() - started < 1
+        finally:
+            cursor.close()
+    finally:
+        session.close()
+
+    with psycopg.connect(postgres_dsn) as lock_holder:
+        lock_holder.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (postgres_module._advisory_lock_key(POSTGRES_DATASET_ID),),
+        )
+        started = time.monotonic()
+        with pytest.raises(PostgresLockContentionError):
+            repository.apply_delta(
+                POSTGRES_DATASET_ID, GoldDeltaPlan((), (), (), (), ()), _state(_timestamp(1))
+            )
+        assert time.monotonic() - started < 1
+        lock_holder.rollback()
+    assert repository.summary(POSTGRES_DATASET_ID).row_count == 0
