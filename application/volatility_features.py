@@ -65,11 +65,13 @@ def _series_features(
     level = f"{series_id}_level"
     mean = f"__{series_id}_mean60"
     std = f"__{series_id}_std60"
+    delta_expressions = [
+        (pl.col(level) - pl.col(level).shift(lag)).alias(f"{series_id}_delta_{lag}obs")
+        for lag in policy.delta_lags
+    ]
     return (
         frame.with_columns(
-            (pl.col(level) - pl.col(level).shift(1)).alias(f"{series_id}_delta_1obs"),
-            (pl.col(level) - pl.col(level).shift(5)).alias(f"{series_id}_delta_5obs"),
-            (pl.col(level) - pl.col(level).shift(20)).alias(f"{series_id}_delta_20obs"),
+            *delta_expressions,
             pl.col(level)
             .rolling_mean(window_size=policy.zscore_window, min_samples=policy.zscore_window)
             .alias(mean),

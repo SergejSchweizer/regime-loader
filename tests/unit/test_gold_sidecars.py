@@ -9,11 +9,13 @@ import pytest
 
 from application.gold_frame import GOLD_COLUMNS
 from application.gold_sidecars import (
-    GOLD_FORMULA_PARAMETERS,
     GoldSidecarBuilder,
     expected_manifest_keys,
     feature_set_sha256,
+    gold_formula_parameters,
 )
+from application.macro_features import MacroFeaturePolicy
+from application.volatility_features import VolatilityFeaturePolicy
 from ingestion.gold_sidecar_store import _profile_png
 
 START = datetime(2026, 8, 19, 2, tzinfo=UTC)
@@ -81,13 +83,29 @@ def test_feature_set_hash_covers_order_dtype_versions_and_formula_parameters() -
     assert base == feature_set_sha256(frame)
     assert base != feature_set_sha256(frame, schema_version=3)
     assert base != feature_set_sha256(frame, feature_version=2)
-    changed_formula = dict(GOLD_FORMULA_PARAMETERS)
-    changed_formula["observation_delta_observations"] = [4, 20]
+    changed_formula = gold_formula_parameters(
+        volatility_policy=VolatilityFeaturePolicy(delta_lags=(1, 5, 20)),
+        macro_policy=MacroFeaturePolicy(immediate_lag=1, short_lag=5, long_lag=20),
+    )
+    changed_formula["term_structure_features"] = ["different_expression"]
     assert base != feature_set_sha256(frame, formula_parameters=changed_formula)
     reordered = frame.select(["timestamp_m1", *reversed(GOLD_COLUMNS[1:])])
     assert base != feature_set_sha256(reordered)
     changed_dtype = frame.with_columns(pl.col("vix_level").cast(pl.Float32))
     assert base != feature_set_sha256(changed_dtype)
+
+
+def test_formula_parameters_track_every_executed_policy_value() -> None:
+    parameters = gold_formula_parameters()
+    assert parameters["volatility_delta_lags"] == [1, 5, 20]
+    assert parameters["macro_delta_lags"] == {
+        "ciss": [1, 5, 20],
+        "euro_hy_oas": [1, 5, 20],
+        "us_2y": [1, 20],
+        "us_10y": [1, 20],
+        "estr": [1, 20],
+        "usd_broad": [1, 20],
+    }
 
 
 def test_git_identity_is_required_with_explicit_deterministic_test_fallback() -> None:

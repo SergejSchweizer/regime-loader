@@ -28,6 +28,18 @@ class MacroFeaturePolicy:
 MACRO_POLICY = MacroFeaturePolicy()
 
 
+def macro_delta_lags(policy: MacroFeaturePolicy) -> dict[str, tuple[int, ...]]:
+    """Return the observation-lag contract executed for every macro source series."""
+    return {
+        "ciss": (policy.immediate_lag, policy.short_lag, policy.long_lag),
+        "euro_hy_oas": (policy.immediate_lag, policy.short_lag, policy.long_lag),
+        "us_2y": (policy.immediate_lag, policy.long_lag),
+        "us_10y": (policy.immediate_lag, policy.long_lag),
+        "estr": (policy.immediate_lag, policy.long_lag),
+        "usd_broad": (policy.immediate_lag, policy.long_lag),
+    }
+
+
 def _timestamp_expression() -> pl.Expr:
     return (
         pl.col("observation_date")
@@ -86,25 +98,10 @@ def build_macro_features(
     missing = [series_id for series_id in MACRO_SERIES if series_id not in silver_by_series]
     if missing:
         raise KeyError(f"missing Silver macro series: {', '.join(missing)}")
+    lags_by_series = macro_delta_lags(policy)
     frames = [
-        _series_frame(
-            "ciss",
-            silver_by_series["ciss"],
-            (policy.immediate_lag, policy.short_lag, policy.long_lag),
-        ),
-        _series_frame(
-            "euro_hy_oas",
-            silver_by_series["euro_hy_oas"],
-            (policy.immediate_lag, policy.short_lag, policy.long_lag),
-        ),
-        _series_frame("us_2y", silver_by_series["us_2y"], (policy.immediate_lag, policy.long_lag)),
-        _series_frame(
-            "us_10y", silver_by_series["us_10y"], (policy.immediate_lag, policy.long_lag)
-        ),
-        _series_frame("estr", silver_by_series["estr"], (policy.immediate_lag, policy.long_lag)),
-        _series_frame(
-            "usd_broad", silver_by_series["usd_broad"], (policy.immediate_lag, policy.long_lag)
-        ),
+        _series_frame(series_id, silver_by_series[series_id], lags)
+        for series_id, lags in lags_by_series.items()
     ]
     joined = _outer_join(frames).with_columns(
         (pl.col("us_10y_level") - pl.col("us_2y_level")).alias("us_10y_minus_us_2y")
