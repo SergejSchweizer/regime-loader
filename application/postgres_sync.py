@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from application.gold_catalog import (
     STRICT_CURRENT,
@@ -23,6 +23,8 @@ POSTGRES_ROW_HASH_TABLE = "gold_row_hashes"
 POSTGRES_TIMESTAMP_COLUMN = "timestamp_m1"
 POSTGRES_TIMESTAMP_SQL_TYPE = "TIMESTAMPTZ(6)"
 POSTGRES_SESSION_TIMEZONE = "UTC"
+
+TransactionResult = TypeVar("TransactionResult")
 
 
 def _utc(value: datetime) -> datetime:
@@ -169,10 +171,8 @@ class GoldSyncResult:
             raise ValueError("Gold sync result counts cannot be negative")
 
 
-class GoldSyncRepository(Protocol):
-    """Narrow serving-plane Repository port; concrete database client stays outside."""
-
-    def ensure_schema(self) -> None: ...
+class GoldSyncTransaction(Protocol):
+    """Locked target-state operations performed within one database transaction."""
 
     def read_state(self, dataset_id: str) -> GoldSyncState | None: ...
 
@@ -186,6 +186,17 @@ class GoldSyncRepository(Protocol):
     ) -> None: ...
 
     def summary(self, dataset_id: str) -> GoldTargetSummary: ...
+
+
+class GoldSyncRepository(Protocol):
+    """Narrow serving-plane Repository port; concrete database client stays outside."""
+
+    def ensure_schema(self) -> None: ...
+
+    def run_locked(
+        self,
+        operation: Callable[[GoldSyncTransaction], TransactionResult],
+    ) -> TransactionResult: ...
 
 
 def require_sync_compatible(record: GoldCatalogRecord) -> None:

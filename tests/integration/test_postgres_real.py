@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from threading import Event, Thread
 
 import psycopg
 import pytest
@@ -18,6 +19,7 @@ from application.postgres_sync import (
     GoldRowDigest,
     GoldRowPayload,
     GoldSyncState,
+    GoldSyncTransaction,
 )
 from ingestion.postgres_gold_repository import PostgresGoldSyncRepository, PostgresSyncConfig
 
@@ -112,9 +114,70 @@ def test_real_postgres_schema_utc_transaction_lock_and_round_trip(
     finally:
         repository_connection.close()
     with psycopg.connect(postgres_dsn) as connection:
-        connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (POSTGRES_DATASET_ID,))
+        connection.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (postgres_module._advisory_lock_key(POSTGRES_DATASET_ID),),
+        )
         connection.execute(_ROLLBACK_STATE_SQL, ("c" * 64, timestamp))
         connection.rollback()
         assert connection.execute(
             "SELECT COUNT(*) FROM regime_loader_sync.gold_sync_state WHERE dataset_id = 'rollback'"
         ).fetchone() == (0,)
+
+
+@pytest.mark.integration
+def test_real_postgres_second_locked_transaction_reads_committed_state(
+    repository: PostgresGoldSyncRepository,
+) -> None:
+    repository.ensure_schema()
+    timestamp = _timestamp(21)
+    row = GoldRowPayload(timestamp, tuple(1.0 for _ in GOLD_COLUMNS[1:]))
+    digest = GoldRowDigest(timestamp, "d" * 64)
+    state = _state(timestamp)
+    first_locked = Event()
+    release_first = Event()
+    second_read = Event()
+    failures: list[Exception] = []
+    observed_states: list[GoldSyncState | None] = []
+
+    def first_sync() -> None:
+        try:
+
+            def operation(transaction: GoldSyncTransaction) -> None:
+                first_locked.set()
+                assert release_first.wait(timeout=5)
+                transaction.apply_delta(
+                    POSTGRES_DATASET_ID,
+                    GoldDeltaPlan((row,), (), (), (), (digest,)),
+                    state,
+                )
+
+            repository.run_locked(operation)
+        except Exception as exc:
+            failures.append(exc)
+
+    def second_sync() -> None:
+        try:
+
+            def operation(transaction: GoldSyncTransaction) -> None:
+                observed_states.append(transaction.read_state(POSTGRES_DATASET_ID))
+                second_read.set()
+
+            repository.run_locked(operation)
+        except Exception as exc:
+            failures.append(exc)
+
+    first = Thread(target=first_sync)
+    second = Thread(target=second_sync)
+    first.start()
+    assert first_locked.wait(timeout=5)
+    second.start()
+    assert not second_read.wait(timeout=0.1)
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert failures == []
+    assert observed_states == [state]

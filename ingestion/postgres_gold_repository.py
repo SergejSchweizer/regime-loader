@@ -6,7 +6,8 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol, cast
+from hashlib import sha256
+from typing import Protocol, TypeVar, cast
 
 import psycopg
 
@@ -23,12 +24,16 @@ from application.postgres_sync import (
     GoldRowDigest,
     GoldRowPayload,
     GoldSyncState,
+    GoldSyncTransaction,
     GoldTargetSummary,
 )
 
 POSTGRES_HOST = "10.10.1.3"
 POSTGRES_PORT = 54321
 POSTGRES_USER = "regime-loader"
+POSTGRES_ADVISORY_LOCK_NAMESPACE = "regime-loader:postgres-gold-sync:v1"
+
+TransactionResult = TypeVar("TransactionResult")
 
 
 class PostgresGoldRepositoryError(RuntimeError):
@@ -248,6 +253,83 @@ def _row_update_params(row: GoldRowPayload) -> tuple[object, ...]:
     return (*row.values, row.timestamp_m1)
 
 
+def _advisory_lock_key(dataset_id: str) -> int:
+    identity = f"{POSTGRES_ADVISORY_LOCK_NAMESPACE}:{dataset_id}".encode("ascii")
+    return int.from_bytes(sha256(identity).digest()[:8], byteorder="big", signed=True)
+
+
+class _PostgresGoldSyncTransaction:
+    def __init__(self, cursor: CursorPort) -> None:
+        self._cursor = cursor
+
+    def read_state(self, dataset_id: str) -> GoldSyncState | None:
+        PostgresGoldSyncRepository._require_dataset(dataset_id)
+        self._cursor.execute(
+            f"SELECT dataset_id, source_build_id, data_sha256, schema_version, "
+            f"feature_version, row_count, min_timestamp, max_timestamp, synced_at_utc "
+            f"FROM {_SYNC_STATE} WHERE dataset_id = %s",
+            (dataset_id,),
+        )
+        row = self._cursor.fetchone()
+        return None if row is None else _state_from_row(row)
+
+    def read_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]:
+        PostgresGoldSyncRepository._require_dataset(dataset_id)
+        self._cursor.execute(
+            f"SELECT timestamp_m1, row_sha256 FROM {_ROW_HASHES} "
+            "WHERE dataset_id = %s ORDER BY timestamp_m1",
+            (dataset_id,),
+        )
+        result: list[GoldRowDigest] = []
+        for row in self._cursor.fetchall():
+            if len(row) != 2:
+                raise ValueError("PostgreSQL Gold digest row has unexpected width")
+            timestamp = _as_datetime(row[0], "timestamp_m1")
+            if timestamp is None:
+                raise ValueError("PostgreSQL Gold digest timestamp cannot be null")
+            result.append(GoldRowDigest(timestamp, _as_text(row[1], "row_sha256")))
+        return tuple(result)
+
+    def summary(self, dataset_id: str) -> GoldTargetSummary:
+        PostgresGoldSyncRepository._require_dataset(dataset_id)
+        self._cursor.execute(_TARGET_SUMMARY_SQL)
+        row = self._cursor.fetchone()
+        if row is None:
+            raise ValueError("PostgreSQL Gold summary query returned no row")
+        return _summary_from_row(row)
+
+    def apply_delta(
+        self,
+        dataset_id: str,
+        plan: GoldDeltaPlan,
+        state: GoldSyncState,
+    ) -> None:
+        PostgresGoldSyncRepository._require_dataset(dataset_id)
+        if state.dataset_id != dataset_id:
+            raise ValueError("Gold sync state dataset does not match requested dataset")
+        digests = PostgresGoldSyncRepository._source_digest_map(plan.source_digests)
+        for row in (*plan.inserts, *plan.updates):
+            if row.timestamp_m1 not in digests:
+                raise ValueError("Gold delta mutation is missing its source row digest")
+        for row in plan.inserts:
+            self._cursor.execute(_INSERT_ROW_SQL, _row_insert_params(row))
+        for row in plan.updates:
+            self._cursor.execute(_UPDATE_ROW_SQL, _row_update_params(row))
+        for timestamp in plan.deletes:
+            self._cursor.execute(_DELETE_ROW_SQL, (timestamp,))
+        for row in (*plan.inserts, *plan.updates):
+            self._cursor.execute(
+                _UPSERT_DIGEST_SQL,
+                (dataset_id, row.timestamp_m1, digests[row.timestamp_m1]),
+            )
+        for timestamp in plan.deletes:
+            self._cursor.execute(_DELETE_DIGEST_SQL, (dataset_id, timestamp))
+        expected = GoldTargetSummary(state.row_count, state.min_timestamp, state.max_timestamp)
+        if self.summary(dataset_id) != expected:
+            raise ValueError("PostgreSQL Gold post-write summary does not match source")
+        self._cursor.execute(_UPSERT_STATE_SQL, _state_params(state))
+
+
 class PostgresGoldSyncRepository:
     """Transactional Repository Adapter for the rebuildable Gold serving replica."""
 
@@ -292,6 +374,29 @@ class PostgresGoldSyncRepository:
             raise PostgresGoldRepositoryError(
                 "PostgreSQL Gold schema initialization failed"
             ) from None
+        finally:
+            connection.close()
+
+    def run_locked(
+        self,
+        operation: Callable[[GoldSyncTransaction], TransactionResult],
+    ) -> TransactionResult:
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            try:
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(%s)",
+                    (_advisory_lock_key(POSTGRES_DATASET_ID),),
+                )
+                result = operation(_PostgresGoldSyncTransaction(cursor))
+            finally:
+                cursor.close()
+            connection.commit()
+            return result
+        except Exception:
+            connection.rollback()
+            raise PostgresGoldRepositoryError("PostgreSQL Gold locked transaction failed") from None
         finally:
             connection.close()
 
@@ -380,7 +485,9 @@ class PostgresGoldSyncRepository:
         try:
             cursor = connection.cursor()
             try:
-                cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (dataset_id,))
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(%s)", (_advisory_lock_key(dataset_id),)
+                )
                 for row in plan.inserts:
                     cursor.execute(_INSERT_ROW_SQL, _row_insert_params(row))
                 for row in plan.updates:

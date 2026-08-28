@@ -1993,11 +1993,11 @@ Acceptance:
 ## PR-53: Acquire PostgreSQL Lock Before Reading And Planning
 
 PR name: `postgres-lock-before-plan-uow`
-Status: Planned
-Updated: 2026-08-24
+Status: In Progress
+Updated: 2026-08-28
 PR: TBD
 Git branch: `pr-53/postgres-lock-before-plan-uow`
-Git status: `not-started (branch absent)`
+Git status: `active-clean`
 Agent lane: PostgreSQL concurrency; one agent only
 Depends on: PR-43
 Commit: `fix(pr-53): lock postgres before delta planning`
