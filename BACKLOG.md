@@ -1689,7 +1689,7 @@ Safe first parallel wave after PR-40: PR-41, PR-42, PR-43, PR-44, PR-47, PR-48, 
 
 PR name: `postgres-temporal-conformance-plan`
 Status: In Progress
-Updated: 2026-08-24
+Updated: 2026-08-28
 PR: #42
 Git branch: `pr-40/postgres-temporal-conformance-plan`
 Git status: `active-clean`
@@ -2185,7 +2185,7 @@ Status: In Progress
 Updated: 2026-08-24
 PR: TBD
 Git branch: `pr-61/authoritative-production-reconstruction`
-Git status: `active-dirty: implementation in progress`
+Git status: `active-clean`
 Agent lane: Production cutover; one agent only
 Depends on: PR-41, PR-42, PR-43, PR-44, PR-45, PR-46, PR-47, PR-48, PR-49, PR-50, PR-51, PR-52, PR-53, PR-54, PR-55, PR-56, PR-57, PR-58, PR-59, PR-60
 Commit: `chore(pr-61): reconstruct production serving state`
