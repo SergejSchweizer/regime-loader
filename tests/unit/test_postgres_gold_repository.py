@@ -72,9 +72,15 @@ class FakeCursor:
         self.connection = connection
         self.one: tuple[object, ...] | None = None
         self.many: list[tuple[object, ...]] = []
+        self._rowcount = 1
+
+    @property
+    def rowcount(self) -> int:
+        return self._rowcount
 
     def execute(self, query: str, params: object = None) -> object:
         self.connection.events.append(("execute", query, params))
+        self._rowcount = self.connection.rowcounts.get(query, 1)
         if self.connection.fail_on and self.connection.fail_on in query:
             raise RuntimeError("database failure repo-secret")
         if query.startswith("SELECT version"):
@@ -113,6 +119,8 @@ class FakeCursor:
             self.one = self.connection.state_row
         elif query.startswith("SELECT timestamp_m1, row_sha256"):
             self.many = list(self.connection.digest_rows)
+        elif query.startswith('SELECT "timestamp_m1"'):
+            self.many = list(self.connection.consumer_rows)
         elif query.startswith("SELECT COUNT"):
             self.one = self.connection.summary_row
         return self
@@ -133,11 +141,15 @@ class FakeConnection:
         *,
         state_row: tuple[object, ...] | None = None,
         digest_rows: tuple[tuple[object, ...], ...] = (),
+        consumer_rows: tuple[tuple[object, ...], ...] = (),
+        rowcounts: dict[str, int] | None = None,
         summary_row: tuple[object, ...] = (0, None, None),
         fail_on: str | None = None,
     ) -> None:
         self.state_row = state_row
         self.digest_rows = digest_rows
+        self.consumer_rows = consumer_rows
+        self.rowcounts = {} if rowcounts is None else rowcounts
         self.summary_row = summary_row
         self.fail_on = fail_on
         self.events: list[tuple[str, object, object]] = []
@@ -386,6 +398,27 @@ def test_read_digests_rejects_invalid_database_timestamp() -> None:
         repository.read_digests(POSTGRES_DATASET_ID)
 
 
+def test_read_consumer_digests_hashes_complete_rows_in_timestamp_order() -> None:
+    first = _row(1, 1.0)
+    second = _row(2, 2.0)
+    connection = FakeConnection(
+        consumer_rows=(
+            (first.timestamp_m1, *first.values),
+            (second.timestamp_m1, *second.values),
+        )
+    )
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+
+    assert repository.read_consumer_digests(POSTGRES_DATASET_ID) == (
+        GoldRowDigest(first.timestamp_m1, module.gold_row_sha256(first)),
+        GoldRowDigest(second.timestamp_m1, module.gold_row_sha256(second)),
+    )
+    consumer_query = next(
+        query for query in _execute_queries(connection) if query.startswith('SELECT "timestamp_m1"')
+    )
+    assert all(f'"{column}"' in consumer_query for column in GOLD_COLUMNS)
+
+
 def test_summary_returns_count_and_utc_bounds() -> None:
     connection = FakeConnection(summary_row=(2, _ts(1), _ts(2)))
     repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
@@ -407,12 +440,19 @@ def test_apply_delta_is_locked_exact_and_state_is_last_before_commit() -> None:
     update = _row(1, 10.0)
     delete = _ts(3)
     digests = (
-        GoldRowDigest(update.timestamp_m1, "a" * 64),
-        GoldRowDigest(insert.timestamp_m1, "b" * 64),
+        GoldRowDigest(update.timestamp_m1, module.gold_row_sha256(update)),
+        GoldRowDigest(insert.timestamp_m1, module.gold_row_sha256(insert)),
     )
     plan = GoldDeltaPlan((insert,), (update,), (delete,), (), digests)
     state = _state()
-    connection = FakeConnection(summary_row=(2, _ts(1), _ts(2)))
+    connection = FakeConnection(
+        digest_rows=tuple((digest.timestamp_m1, digest.row_sha256) for digest in digests),
+        consumer_rows=(
+            (update.timestamp_m1, *update.values),
+            (insert.timestamp_m1, *insert.values),
+        ),
+        summary_row=(2, _ts(1), _ts(2)),
+    )
     repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
     repository.apply_delta(POSTGRES_DATASET_ID, plan, state)
 
@@ -471,11 +511,15 @@ def test_locked_transaction_uses_deterministic_namespaced_key_before_reads() -> 
 def test_first_bootstrap_can_insert_complete_source_without_full_reload_sql() -> None:
     rows = (_row(1, 1.0), _row(2, 2.0))
     digests = (
-        GoldRowDigest(_ts(1), "a" * 64),
-        GoldRowDigest(_ts(2), "b" * 64),
+        GoldRowDigest(rows[0].timestamp_m1, module.gold_row_sha256(rows[0])),
+        GoldRowDigest(rows[1].timestamp_m1, module.gold_row_sha256(rows[1])),
     )
     plan = GoldDeltaPlan(rows, (), (), (), digests)
-    connection = FakeConnection(summary_row=(2, _ts(1), _ts(2)))
+    connection = FakeConnection(
+        digest_rows=tuple((digest.timestamp_m1, digest.row_sha256) for digest in digests),
+        consumer_rows=tuple((row.timestamp_m1, *row.values) for row in rows),
+        summary_row=(2, _ts(1), _ts(2)),
+    )
     repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
     repository.apply_delta(POSTGRES_DATASET_ID, plan, _state())
     queries = _execute_queries(connection)
@@ -503,6 +547,35 @@ def test_transaction_failure_rolls_back_and_error_is_sanitized() -> None:
     assert "repo-secret" not in str(exc_info.value)
     assert ("rollback", None, None) in connection.events
     assert ("commit", None, None) not in connection.events
+
+
+def test_missing_planned_update_rolls_back_before_state_write() -> None:
+    row = _row(1, 1.0)
+    plan = GoldDeltaPlan(
+        (),
+        (row,),
+        (),
+        (),
+        (GoldRowDigest(row.timestamp_m1, module.gold_row_sha256(row)),),
+    )
+    connection = FakeConnection(
+        rowcounts={module._UPDATE_ROW_SQL: 0},
+        summary_row=(1, _ts(1), _ts(1)),
+    )
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+
+    with pytest.raises(PostgresGoldRepositoryError):
+        repository.apply_delta(
+            POSTGRES_DATASET_ID,
+            plan,
+            _state(count=1, minimum=_ts(1), maximum=_ts(1)),
+        )
+
+    queries = _execute_queries(connection)
+    assert not any(
+        'INSERT INTO "regime_loader_sync"."gold_sync_state"' in query for query in queries
+    )
+    assert ("rollback", None, None) in connection.events
 
 
 def test_lock_timeout_is_typed_sanitized_and_rolls_back() -> None:

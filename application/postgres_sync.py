@@ -178,6 +178,8 @@ class GoldSyncTransaction(Protocol):
 
     def read_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]: ...
 
+    def read_consumer_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]: ...
+
     def apply_delta(
         self,
         dataset_id: str,

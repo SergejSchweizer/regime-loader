@@ -7,10 +7,12 @@ import time
 from datetime import UTC, datetime
 from threading import Event, Thread
 
+import polars as pl
 import psycopg
 import pytest
 
 import ingestion.postgres_gold_repository as postgres_module
+from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
 from application.gold_frame import GOLD_COLUMNS
 from application.postgres_sync import (
     POSTGRES_CONSUMER_SCHEMA,
@@ -22,6 +24,7 @@ from application.postgres_sync import (
     GoldSyncState,
     GoldSyncTransaction,
 )
+from application.postgres_sync_service import GoldPostgresDeltaSync
 from ingestion.postgres_gold_repository import (
     PostgresAdminConfig,
     PostgresGoldSchemaMigrator,
@@ -97,6 +100,66 @@ def _state(timestamp: datetime) -> GoldSyncState:
     )
 
 
+def _gold_frame(timestamp: datetime) -> pl.DataFrame:
+    data: dict[str, list[object]] = {"timestamp_m1": [timestamp]}
+    for column in GOLD_COLUMNS[1:]:
+        data[column] = [1.0]
+    return pl.DataFrame(data).with_columns(pl.col("timestamp_m1").cast(pl.Datetime("us", "UTC")))
+
+
+class _Catalog:
+    def __init__(self, record: GoldCatalogRecord) -> None:
+        self._record = record
+
+    def read(self) -> list[GoldCatalogRecord]:
+        return [self._record]
+
+
+class _Source:
+    def __init__(self, frame: pl.DataFrame) -> None:
+        self._frame = frame
+
+    def validate_bundle(self, record: GoldCatalogRecord) -> None:
+        del record
+
+    def sha256_path(self, relative_data_path: str) -> str:
+        del relative_data_path
+        return "a" * 64
+
+    def read_path(self, relative_data_path: str) -> pl.DataFrame:
+        del relative_data_path
+        return self._frame
+
+
+def _sync_service(
+    repository: PostgresGoldSyncRepository, timestamp: datetime
+) -> GoldPostgresDeltaSync:
+    frame = _gold_frame(timestamp)
+    record = GoldCatalogRecord(
+        dataset_id=POSTGRES_DATASET_ID,
+        build_id="20260828T000000Z",
+        status=GoldBuildStatus.COMPLETE,
+        current=True,
+        started_at_utc=_timestamp(1),
+        completed_at_utc=_timestamp(2),
+        schema_version=2,
+        feature_version=1,
+        min_timestamp=timestamp,
+        max_timestamp=timestamp,
+        row_count=1,
+        data_path="versions/build_id=20260828T000000Z/data.parquet",
+        build_manifest_path="versions/build_id=20260828T000000Z/manifest.json",
+        plot_path="versions/build_id=20260828T000000Z/feature_profile.png",
+        pruned_at_utc=None,
+    )
+    return GoldPostgresDeltaSync(
+        catalog=_Catalog(record),
+        source=_Source(frame),
+        repository=repository,
+        clock=lambda: _timestamp(28),
+    )
+
+
 @pytest.mark.integration
 def test_real_postgres_migrations_are_idempotent_and_round_trip(
     repository: PostgresGoldSyncRepository, migrator: PostgresGoldSchemaMigrator, postgres_dsn: str
@@ -118,7 +181,7 @@ def test_real_postgres_migrations_are_idempotent_and_round_trip(
 
     timestamp = _timestamp(20)
     row = GoldRowPayload(timestamp, tuple(1.0 for _ in GOLD_COLUMNS[1:]))
-    digest = GoldRowDigest(timestamp, "b" * 64)
+    digest = GoldRowDigest(timestamp, postgres_module.gold_row_sha256(row))
     repository.apply_delta(
         POSTGRES_DATASET_ID, GoldDeltaPlan((row,), (), (), (), (digest,)), _state(timestamp)
     )
@@ -149,6 +212,46 @@ def test_real_postgres_migrations_are_idempotent_and_round_trip(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("tamper", "statement"),
+    (
+        (
+            "changed consumer row",
+            'UPDATE regime_loader.regime_features_daily SET "vix_level" = 999.0',
+        ),
+        ("missing consumer row", "DELETE FROM regime_loader.regime_features_daily"),
+        (
+            "changed digest",
+            "UPDATE regime_loader_sync.gold_row_hashes SET row_sha256 = 'f' || repeat('f', 63)",
+        ),
+        ("missing digest", "DELETE FROM regime_loader_sync.gold_row_hashes"),
+        (
+            "stale state",
+            "UPDATE regime_loader_sync.gold_sync_state SET data_sha256 = 'f' || repeat('f', 63)",
+        ),
+        ("missing state", "DELETE FROM regime_loader_sync.gold_sync_state"),
+    ),
+)
+def test_real_postgres_tampering_fails_closed(
+    repository: PostgresGoldSyncRepository,
+    migrator: PostgresGoldSchemaMigrator,
+    postgres_dsn: str,
+    tamper: str,
+    statement: str,
+) -> None:
+    migrator.migrate()
+    timestamp = _timestamp(20)
+    service = _sync_service(repository, timestamp)
+    assert service.sync().inserted == 1
+
+    with psycopg.connect(postgres_dsn) as connection:
+        connection.execute(statement)
+
+    with pytest.raises(postgres_module.PostgresGoldRepositoryError, match="locked transaction"):
+        service.sync()
+
+
+@pytest.mark.integration
 def test_real_postgres_second_locked_transaction_reads_committed_state(
     repository: PostgresGoldSyncRepository,
     migrator: PostgresGoldSchemaMigrator,
@@ -156,7 +259,7 @@ def test_real_postgres_second_locked_transaction_reads_committed_state(
     migrator.migrate()
     timestamp = _timestamp(21)
     row = GoldRowPayload(timestamp, tuple(1.0 for _ in GOLD_COLUMNS[1:]))
-    digest = GoldRowDigest(timestamp, "d" * 64)
+    digest = GoldRowDigest(timestamp, postgres_module.gold_row_sha256(row))
     state = _state(timestamp)
     first_locked = Event()
     release_first = Event()

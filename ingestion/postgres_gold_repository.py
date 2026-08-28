@@ -12,6 +12,7 @@ from typing import NoReturn, Protocol, TypeVar, cast
 import psycopg
 
 from application.gold_frame import GOLD_COLUMNS
+from application.postgres_delta import gold_row_sha256
 from application.postgres_sync import (
     POSTGRES_CONSUMER_SCHEMA,
     POSTGRES_CONSUMER_TABLE,
@@ -73,6 +74,9 @@ class PostgresLockContentionError(PostgresOperationTimeoutError):
 
 
 class CursorPort(Protocol):
+    @property
+    def rowcount(self) -> int: ...
+
     def execute(self, query: str, params: Sequence[object] | None = None) -> object: ...
 
     def fetchone(self) -> tuple[object, ...] | None: ...
@@ -342,6 +346,10 @@ VALUES (%s, %s, %s)
 ON CONFLICT (dataset_id, timestamp_m1)
 DO UPDATE SET row_sha256 = EXCLUDED.row_sha256"""
 _DELETE_DIGEST_SQL = f"DELETE FROM {_ROW_HASHES} WHERE dataset_id = %s AND timestamp_m1 = %s"
+_CONSUMER_ROWS_SQL = (
+    f"SELECT {', '.join(_quote(column) for column in GOLD_COLUMNS)} "
+    f"FROM {_CONSUMER} ORDER BY {_quote('timestamp_m1')}"
+)
 _TARGET_SUMMARY_SQL = (
     f"SELECT COUNT(*), MIN({_quote('timestamp_m1')}), MAX({_quote('timestamp_m1')}) "
     f"FROM {_CONSUMER}"
@@ -426,6 +434,24 @@ def _summary_from_row(row: tuple[object, ...]) -> GoldTargetSummary:
     )
 
 
+def _payload_from_row(row: tuple[object, ...]) -> GoldRowPayload:
+    if len(row) != len(GOLD_COLUMNS):
+        raise ValueError("PostgreSQL Gold consumer row has unexpected width")
+    timestamp = _as_datetime(row[0], "timestamp_m1")
+    if timestamp is None:
+        raise ValueError("PostgreSQL Gold consumer timestamp cannot be null")
+    values: list[float | None] = []
+    for value in row[1:]:
+        if value is not None and not isinstance(value, float):
+            raise TypeError("PostgreSQL Gold consumer feature must be float or null")
+        values.append(value)
+    return GoldRowPayload(timestamp, tuple(values))
+
+
+def _digest_map(digests: tuple[GoldRowDigest, ...]) -> dict[datetime, str]:
+    return {digest.timestamp_m1: digest.row_sha256 for digest in digests}
+
+
 def _state_params(state: GoldSyncState) -> tuple[object, ...]:
     return (
         state.dataset_id,
@@ -485,6 +511,14 @@ class _PostgresGoldSyncTransaction:
             result.append(GoldRowDigest(timestamp, _as_text(row[1], "row_sha256")))
         return tuple(result)
 
+    def read_consumer_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]:
+        PostgresGoldSyncRepository._require_dataset(dataset_id)
+        self._cursor.execute(_CONSUMER_ROWS_SQL)
+        return tuple(
+            GoldRowDigest(payload.timestamp_m1, gold_row_sha256(payload))
+            for payload in (_payload_from_row(row) for row in self._cursor.fetchall())
+        )
+
     def summary(self, dataset_id: str) -> GoldTargetSummary:
         PostgresGoldSyncRepository._require_dataset(dataset_id)
         self._cursor.execute(_TARGET_SUMMARY_SQL)
@@ -510,8 +544,10 @@ class _PostgresGoldSyncTransaction:
             self._cursor.execute(_INSERT_ROW_SQL, _row_insert_params(row))
         for row in plan.updates:
             self._cursor.execute(_UPDATE_ROW_SQL, _row_update_params(row))
+            self._require_exactly_one_row("update")
         for timestamp in plan.deletes:
             self._cursor.execute(_DELETE_ROW_SQL, (timestamp,))
+            self._require_exactly_one_row("delete")
         for row in (*plan.inserts, *plan.updates):
             self._cursor.execute(
                 _UPSERT_DIGEST_SQL,
@@ -522,7 +558,15 @@ class _PostgresGoldSyncTransaction:
         expected = GoldTargetSummary(state.row_count, state.min_timestamp, state.max_timestamp)
         if self.summary(dataset_id) != expected:
             raise ValueError("PostgreSQL Gold post-write summary does not match source")
+        if _digest_map(self.read_digests(dataset_id)) != _digest_map(plan.source_digests):
+            raise ValueError("PostgreSQL Gold post-write digest index does not match source")
+        if _digest_map(self.read_consumer_digests(dataset_id)) != _digest_map(plan.source_digests):
+            raise ValueError("PostgreSQL Gold post-write consumer rows do not match source")
         self._cursor.execute(_UPSERT_STATE_SQL, _state_params(state))
+
+    def _require_exactly_one_row(self, operation: str) -> None:
+        if self._cursor.rowcount != 1:
+            raise ValueError(f"PostgreSQL Gold {operation} affected an unexpected row count")
 
 
 class PostgresGoldSyncRepository:
@@ -648,6 +692,22 @@ class PostgresGoldSyncRepository:
         finally:
             connection.close()
 
+    def read_consumer_digests(self, dataset_id: str) -> tuple[GoldRowDigest, ...]:
+        self._require_dataset(dataset_id)
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            try:
+                return _PostgresGoldSyncTransaction(cursor).read_consumer_digests(dataset_id)
+            finally:
+                cursor.close()
+        except PostgresGoldRepositoryError:
+            raise
+        except Exception as exc:
+            _raise_sanitized_error("Gold consumer read", exc)
+        finally:
+            connection.close()
+
     def summary(self, dataset_id: str) -> GoldTargetSummary:
         self._require_dataset(dataset_id)
         connection = self._open()
@@ -694,8 +754,12 @@ class PostgresGoldSyncRepository:
                     cursor.execute(_INSERT_ROW_SQL, _row_insert_params(row))
                 for row in plan.updates:
                     cursor.execute(_UPDATE_ROW_SQL, _row_update_params(row))
+                    if cursor.rowcount != 1:
+                        raise ValueError("PostgreSQL Gold update affected an unexpected row count")
                 for timestamp in plan.deletes:
                     cursor.execute(_DELETE_ROW_SQL, (timestamp,))
+                    if cursor.rowcount != 1:
+                        raise ValueError("PostgreSQL Gold delete affected an unexpected row count")
 
                 for row in (*plan.inserts, *plan.updates):
                     cursor.execute(
@@ -717,6 +781,16 @@ class PostgresGoldSyncRepository:
                 )
                 if actual != expected:
                     raise ValueError("PostgreSQL Gold post-write summary does not match source")
+                if _digest_map(
+                    _PostgresGoldSyncTransaction(cursor).read_digests(dataset_id)
+                ) != _digest_map(plan.source_digests):
+                    raise ValueError(
+                        "PostgreSQL Gold post-write digest index does not match source"
+                    )
+                if _digest_map(
+                    _PostgresGoldSyncTransaction(cursor).read_consumer_digests(dataset_id)
+                ) != _digest_map(plan.source_digests):
+                    raise ValueError("PostgreSQL Gold post-write consumer rows do not match source")
                 cursor.execute(_UPSERT_STATE_SQL, _state_params(state))
             finally:
                 cursor.close()

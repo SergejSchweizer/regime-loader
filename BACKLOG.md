@@ -2085,11 +2085,11 @@ Acceptance:
 ## PR-57: Verify Actual Consumer Rows, Digest Index, And Sync State Agree
 
 PR name: `postgres-consumer-integrity-verification`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: #64
 Git branch: `pr-57/postgres-consumer-integrity-verification`
-Git status: `not-started (branch absent)`
+Git status: `pushed-ci-failing`
 Agent lane: PostgreSQL correctness; one agent only
 Depends on: PR-43, PR-52, PR-53, PR-54, PR-56
 Commit: `fix(pr-57): verify postgres consumer integrity`
