@@ -12,18 +12,44 @@ from datetime import UTC, datetime
 import polars as pl
 
 from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
+from application.macro_features import MACRO_POLICY, MacroFeaturePolicy, macro_delta_lags
+from application.volatility_features import VOLATILITY_POLICY, VolatilityFeaturePolicy
 
 _DATASET_ID = "regime_features_daily"
 _GIT_HASH_RE = re.compile(r"^[0-9a-f]{40,64}$")
 _TEST_GIT_FALLBACK = "0" * 40
 
-GOLD_FORMULA_PARAMETERS: dict[str, object] = {
-    "cross_series_alignment": "same timestamp only",
-    "missing_data_policy": "no fill interpolation centered window or asof carry",
-    "observation_delta_semantics": "source-unit absolute difference over valid observations",
-    "observation_delta_observations": [1, 5, 20],
-    "volatility_zscore": {"ddof": 0, "window_observations": 60},
-}
+
+def gold_formula_parameters(
+    volatility_policy: VolatilityFeaturePolicy = VOLATILITY_POLICY,
+    macro_policy: MacroFeaturePolicy = MACRO_POLICY,
+) -> dict[str, object]:
+    """Return every policy and expression semantic that defines Gold feature values."""
+    return {
+        "cross_series_alignment": "same timestamp only",
+        "missing_data_policy": "no fill interpolation centered window or asof carry",
+        "observation_delta_semantics": "source-unit absolute difference over valid observations",
+        "volatility_delta_lags": list(volatility_policy.delta_lags),
+        "macro_delta_lags": {
+            series_id: list(lags) for series_id, lags in macro_delta_lags(macro_policy).items()
+        },
+        "volatility_zscore": {
+            "ddof": volatility_policy.zscore_ddof,
+            "window_observations": volatility_policy.zscore_window,
+        },
+        "term_structure_features": [
+            "vix9d_vix_ratio",
+            "vix_vix3m_ratio",
+            "vix3m_minus_vix",
+            "vix6m_minus_vix",
+            "vix1y_minus_vix",
+            "us_10y_minus_us_2y",
+        ],
+        "ratio_missing_value_rule": "null unless numerator and positive denominator exist",
+    }
+
+
+GOLD_FORMULA_PARAMETERS = gold_formula_parameters()
 
 
 def _utc_text(value: datetime) -> str:
