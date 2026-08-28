@@ -69,7 +69,39 @@ class FakeCursor:
         self.connection.events.append(("execute", query, params))
         if self.connection.fail_on and self.connection.fail_on in query:
             raise RuntimeError("database failure repo-secret")
-        if query.startswith("SELECT dataset_id"):
+        if query.startswith("SELECT version"):
+            self.many = []
+        elif "FROM information_schema.tables" in query:
+            self.many = sorted(
+                (specification.schema, specification.name)
+                for specification in module._SCHEMA_SPECIFICATION
+            )
+        elif "FROM information_schema.columns" in query:
+            self.many = [
+                (
+                    specification.schema,
+                    specification.name,
+                    ordinal,
+                    column.name,
+                    column.data_type,
+                    column.precision if column.data_type == "timestamp with time zone" else None,
+                    column.precision if column.data_type == "character" else None,
+                    "YES" if column.nullable else "NO",
+                )
+                for specification in module._SCHEMA_SPECIFICATION
+                for ordinal, column in enumerate(specification.columns, start=1)
+            ]
+        elif "FROM information_schema.table_constraints" in query:
+            self.many = [
+                (
+                    specification.schema,
+                    specification.name,
+                    "PRIMARY KEY",
+                    specification.primary_key,
+                )
+                for specification in module._SCHEMA_SPECIFICATION
+            ]
+        elif query.startswith("SELECT dataset_id"):
             self.one = self.connection.state_row
         elif query.startswith("SELECT timestamp_m1, row_sha256"):
             self.many = list(self.connection.digest_rows)
@@ -191,7 +223,7 @@ def test_default_connection_passes_connect_timeout_and_application_name(
     assert captured["application_name"] == "regime-loader"
 
 
-def test_schema_ddl_is_gold_only_timestamptz_and_idempotent() -> None:
+def test_schema_migrations_are_gold_only_timestamptz_and_idempotent() -> None:
     connection = FakeConnection()
     factory = Factory(connection)
     repository = PostgresGoldSyncRepository(_config(), connection_factory=factory)
@@ -208,10 +240,13 @@ def test_schema_ddl_is_gold_only_timestamptz_and_idempotent() -> None:
     assert '"timestamp_m1" TIMESTAMPTZ(6) NOT NULL PRIMARY KEY' in ddl
     for column in GOLD_COLUMNS[1:]:
         assert f'"{column}" DOUBLE PRECISION NULL' in ddl
-        assert f'ADD COLUMN IF NOT EXISTS "{column}" DOUBLE PRECISION NULL' in ddl
     assert '"regime_loader"."regime_features_daily"' in ddl
     assert '"regime_loader_sync"."gold_sync_state"' in ddl
     assert '"regime_loader_sync"."gold_row_hashes"' in ddl
+    assert '"regime_loader_sync"."schema_migrations"' in ddl
+    assert queries.count(module._CONSUMER_DDL) == 1
+    assert queries.count(module._SYNC_STATE_DDL) == 1
+    assert queries.count(module._ROW_HASH_DDL) == 1
     assert "TRUNCATE" not in ddl
     assert "DROP TABLE" not in ddl
     assert "CREATE SCHEMA" not in ddl
