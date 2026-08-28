@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -198,6 +198,34 @@ def test_read_state_round_trips_exact_sync_metadata() -> None:
     assert repository.read_state(POSTGRES_DATASET_ID) is None
 
 
+@pytest.mark.parametrize(
+    "invalid_timestamp",
+    [
+        datetime(2026, 8, 1),
+        datetime(2026, 8, 1, tzinfo=timezone(timedelta(hours=1))),
+    ],
+)
+def test_read_state_rejects_invalid_database_timestamp(invalid_timestamp: datetime) -> None:
+    state = _state()
+    connection = FakeConnection(
+        state_row=(
+            state.dataset_id,
+            state.source_build_id,
+            state.data_sha256,
+            state.schema_version,
+            state.feature_version,
+            state.row_count,
+            invalid_timestamp,
+            state.max_timestamp,
+            state.synced_at_utc,
+        )
+    )
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+
+    with pytest.raises(PostgresGoldRepositoryError, match="sync-state read failed"):
+        repository.read_state(POSTGRES_DATASET_ID)
+
+
 def test_read_digests_fetches_only_timestamp_and_hash_in_order() -> None:
     connection = FakeConnection(digest_rows=((_ts(1), "a" * 64), (_ts(2), "b" * 64)))
     repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
@@ -213,10 +241,28 @@ def test_read_digests_fetches_only_timestamp_and_hash_in_order() -> None:
         assert feature not in digest_query
 
 
+def test_read_digests_rejects_invalid_database_timestamp() -> None:
+    connection = FakeConnection(digest_rows=((datetime(2026, 8, 1), "a" * 64),))
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+
+    with pytest.raises(PostgresGoldRepositoryError, match="digest read failed"):
+        repository.read_digests(POSTGRES_DATASET_ID)
+
+
 def test_summary_returns_count_and_utc_bounds() -> None:
     connection = FakeConnection(summary_row=(2, _ts(1), _ts(2)))
     repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
     assert repository.summary(POSTGRES_DATASET_ID) == GoldTargetSummary(2, _ts(1), _ts(2))
+
+
+def test_summary_rejects_non_utc_database_timestamp() -> None:
+    connection = FakeConnection(
+        summary_row=(2, _ts(1), datetime(2026, 8, 2, tzinfo=timezone(timedelta(hours=2))))
+    )
+    repository = PostgresGoldSyncRepository(_config(), connection_factory=Factory(connection))
+
+    with pytest.raises(PostgresGoldRepositoryError, match="summary read failed"):
+        repository.summary(POSTGRES_DATASET_ID)
 
 
 def test_apply_delta_is_locked_exact_and_state_is_last_before_commit() -> None:
