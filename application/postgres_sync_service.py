@@ -62,7 +62,7 @@ class GoldPostgresDeltaSync:
     def sync(self) -> GoldSyncResult:
         record = select_current_sync_record(self.catalog.read())
         self._validate_bundle(record)
-        self.repository.ensure_schema()
+        self.repository.preflight_schema()
         data_path = self._required_data_path(record)
         data_sha256 = self.source.sha256_path(data_path)
         self._validate_sha256(data_sha256)

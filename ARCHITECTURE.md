@@ -124,6 +124,18 @@ Prefer `typing.Protocol`, immutable dataclasses/Pydantic models, and composition
 | `scripts/` | operational wrappers, GitHub/quality tooling | hidden domain behavior |
 | `tests/` | unit/contract/regression/offline integration | production behavior |
 
+## PostgreSQL Administration Boundary
+
+`gold-sync-postgres` is a runtime DML command. Before acquiring its locked row-mutation
+transaction, it performs a read-only schema-contract preflight against the administered
+PR-54 tables, columns, and keys. Missing or incompatible schema fails closed; runtime
+sync never creates, alters, drops, grants, or migrates PostgreSQL objects.
+
+`postgres-migrate` is the separate explicit admin command that applies idempotent schema
+migrations. It is composed with protected `MARKET_REGIME_POSTGRES_ADMIN_*` credentials,
+which are distinct from runtime `PG*` credentials. Normal cron export provides runtime
+configuration only and never exports administrator credentials.
+
 ## Initial Series Registry
 
 Exactly these canonical series are in MVP:

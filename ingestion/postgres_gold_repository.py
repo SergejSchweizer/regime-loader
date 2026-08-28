@@ -132,10 +132,59 @@ class PostgresSyncConfig:
         return cls.from_mapping(os.environ)
 
 
-ConnectionFactory = Callable[[PostgresSyncConfig], ConnectionPort]
+@dataclass(frozen=True, slots=True)
+class PostgresAdminConfig:
+    """Protected configuration for explicit schema migration only."""
+
+    host: str
+    port: int
+    user: str
+    database: str
+    password: str = field(repr=False)
+    timeout_policy: PostgresTimeoutPolicy = field(default_factory=PostgresTimeoutPolicy)
+
+    def __post_init__(self) -> None:
+        if self.host != POSTGRES_HOST:
+            raise ValueError(f"PostgreSQL admin host must be {POSTGRES_HOST}")
+        if self.port != POSTGRES_PORT:
+            raise ValueError(f"PostgreSQL admin port must be {POSTGRES_PORT}")
+        if not self.user:
+            raise ValueError("PostgreSQL admin user is required")
+        if self.user == POSTGRES_USER:
+            raise ValueError("PostgreSQL admin user must differ from runtime user")
+        if not self.database:
+            raise ValueError("PostgreSQL admin database is required")
+        if not self.password:
+            raise ValueError("PostgreSQL admin password is required")
+
+    @classmethod
+    def from_mapping(cls, values: Mapping[str, str]) -> PostgresAdminConfig:
+        try:
+            port = int(values.get("MARKET_REGIME_POSTGRES_ADMIN_PORT", ""))
+        except ValueError as exc:
+            raise ValueError("MARKET_REGIME_POSTGRES_ADMIN_PORT must be an integer") from exc
+        config = cls(
+            host=values.get("MARKET_REGIME_POSTGRES_ADMIN_HOST", ""),
+            port=port,
+            user=values.get("MARKET_REGIME_POSTGRES_ADMIN_USER", ""),
+            database=values.get("MARKET_REGIME_POSTGRES_ADMIN_DATABASE", ""),
+            password=values.get("MARKET_REGIME_POSTGRES_ADMIN_PASSWORD", ""),
+        )
+        runtime_password = values.get("PGPASSWORD", "")
+        if runtime_password and runtime_password == config.password:
+            raise ValueError("PostgreSQL admin password must differ from runtime password")
+        return config
+
+    @classmethod
+    def from_env(cls) -> PostgresAdminConfig:
+        return cls.from_mapping(os.environ)
 
 
-def _default_connection(config: PostgresSyncConfig) -> ConnectionPort:
+PostgresConnectionConfig = PostgresSyncConfig | PostgresAdminConfig
+ConnectionFactory = Callable[[PostgresConnectionConfig], ConnectionPort]
+
+
+def _default_connection(config: PostgresConnectionConfig) -> ConnectionPort:
     connection = psycopg.connect(
         host=config.host,
         port=config.port,
@@ -504,41 +553,22 @@ class PostgresGoldSyncRepository:
                 connection.close()
             _raise_sanitized_error("connection initialization", exc)
 
-    def ensure_schema(self) -> None:
+    def preflight_schema(self) -> None:
         connection = self._open()
         try:
             cursor = connection.cursor()
             try:
-                cursor.execute(_MIGRATION_LEDGER_DDL)
-                cursor.execute(f"SELECT version FROM {_MIGRATION_LEDGER} ORDER BY version")
-                applied_versions = tuple(
-                    _as_int(row[0], "migration version") for row in cursor.fetchall()
-                )
-                expected_versions = tuple(range(1, len(_MIGRATIONS) + 1))
-                if any(version not in expected_versions for version in applied_versions):
-                    raise ValueError(
-                        "PostgreSQL schema migration ledger contains an unknown version"
-                    )
-                for version, statements in enumerate(_MIGRATIONS, start=1):
-                    if version in applied_versions:
-                        continue
-                    for statement in statements:
-                        cursor.execute(statement)
-                    cursor.execute(
-                        f"INSERT INTO {_MIGRATION_LEDGER} (version, applied_at_utc) "
-                        "VALUES (%s, CURRENT_TIMESTAMP)",
-                        (version,),
-                    )
+                cursor.execute("SET TRANSACTION READ ONLY")
                 self._assert_schema_contract(cursor)
             finally:
                 cursor.close()
-            connection.commit()
+            connection.rollback()
         except PostgresGoldRepositoryError:
             connection.rollback()
             raise
         except Exception as exc:
             connection.rollback()
-            _raise_sanitized_error("Gold schema initialization", exc)
+            _raise_sanitized_error("Gold schema preflight", exc)
         finally:
             connection.close()
 
@@ -774,3 +804,70 @@ class PostgresGoldSyncRepository:
         }
         if actual_keys != expected_keys:
             raise ValueError("PostgreSQL key contract does not match specification")
+
+
+class PostgresGoldSchemaMigrator:
+    """Admin-only adapter for idempotent serving-schema migrations."""
+
+    def __init__(
+        self,
+        config: PostgresAdminConfig,
+        *,
+        connection_factory: ConnectionFactory = _default_connection,
+    ) -> None:
+        self._config = config
+        self._connection_factory = connection_factory
+
+    def _open(self) -> ConnectionPort:
+        connection: ConnectionPort | None = None
+        try:
+            connection = self._connection_factory(self._config)
+            cursor = connection.cursor()
+            try:
+                for statement in _session_configuration(self._config.timeout_policy):
+                    cursor.execute(statement)
+            finally:
+                cursor.close()
+            return connection
+        except Exception as exc:
+            if connection is not None:
+                connection.close()
+            _raise_sanitized_error("admin connection initialization", exc)
+
+    def migrate(self) -> None:
+        connection = self._open()
+        try:
+            cursor = connection.cursor()
+            try:
+                cursor.execute(_MIGRATION_LEDGER_DDL)
+                cursor.execute(f"SELECT version FROM {_MIGRATION_LEDGER} ORDER BY version")
+                applied_versions = tuple(
+                    _as_int(row[0], "migration version") for row in cursor.fetchall()
+                )
+                expected_versions = tuple(range(1, len(_MIGRATIONS) + 1))
+                if any(version not in expected_versions for version in applied_versions):
+                    raise ValueError(
+                        "PostgreSQL schema migration ledger contains an unknown version"
+                    )
+                for version, statements in enumerate(_MIGRATIONS, start=1):
+                    if version in applied_versions:
+                        continue
+                    for statement in statements:
+                        cursor.execute(statement)
+                    cursor.execute(
+                        f"INSERT INTO {_MIGRATION_LEDGER} (version, applied_at_utc) "
+                        "VALUES (%s, CURRENT_TIMESTAMP)",
+                        (version,),
+                    )
+                PostgresGoldSyncRepository._assert_schema_contract(cursor)
+            finally:
+                cursor.close()
+            connection.commit()
+        except PostgresGoldRepositoryError:
+            connection.rollback()
+            raise
+        except Exception as exc:
+            connection.rollback()
+            _raise_sanitized_error("Gold schema migration", exc)
+        finally:
+            connection.close()

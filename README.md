@@ -286,6 +286,7 @@ reconcile
 silver-build
 gold-build
 gold-sync-postgres
+postgres-migrate
 inventory
 run-daily
 ```
@@ -314,6 +315,9 @@ uv run regime-loader \
 uv run regime-loader \
   --lake-root /srv/market-regime/lake \
   gold-sync-postgres
+
+# Explicitly apply PostgreSQL schema migrations with protected admin credentials.
+uv run regime-loader postgres-migrate
 
 # Rebuild and print the local inventory.
 uv run regime-loader \
@@ -353,7 +357,7 @@ Use a **persistent** lake path. A container-local ephemeral path would lose incr
 
 FRED-backed source commands require `FRED_API_KEY`. Gold-capable commands (`gold-build`, `run-daily`) record the source Git commit and packaged/deployed environments should set `MARKET_REGIME_GIT_COMMIT` explicitly.
 
-PostgreSQL synchronization requires the dedicated repository role and exact endpoint:
+`gold-sync-postgres` uses only the dedicated runtime role and exact endpoint:
 
 ```text
 PGHOST=10.10.1.3
@@ -363,7 +367,11 @@ PGDATABASE=<serving database>
 PGPASSWORD=<repository-specific secret>
 ```
 
-Do not commit these values as a credential string. Deployment configuration lives in ignored `config.yaml`. `scripts/export_cron_config.py config.yaml` validates the exact host, port, and role and exports shell-safe `PG*`, lake, project, mirror, FRED, and logging variables. The repository password must be distinct from the PostgreSQL administrator password.
+Runtime sync first performs a read-only schema-contract preflight. Missing or incompatible PR-54 tables, columns, or keys fail before it acquires the row-mutation transaction. It never creates, alters, drops, grants, or migrates PostgreSQL objects.
+
+Schema migration is an explicit, separately authorized `postgres-migrate` operation. It requires the protected admin-only environment variables `MARKET_REGIME_POSTGRES_ADMIN_HOST`, `MARKET_REGIME_POSTGRES_ADMIN_PORT`, `MARKET_REGIME_POSTGRES_ADMIN_USER`, `MARKET_REGIME_POSTGRES_ADMIN_DATABASE`, and `MARKET_REGIME_POSTGRES_ADMIN_PASSWORD`. The admin user and password are distinct from the runtime role/credential and are never exported by the normal cron configuration.
+
+Do not commit either credential set as a connection string. Deployment configuration lives in ignored `config.yaml`. `scripts/export_cron_config.py config.yaml` validates the exact runtime host, port, and role and exports shell-safe runtime `PG*`, lake, project, mirror, FRED, and logging variables only.
 
 The canonical main log is enforced as:
 

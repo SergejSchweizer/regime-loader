@@ -138,8 +138,8 @@ class FakeRepository:
         self.applied: list[tuple[GoldDeltaPlan, GoldSyncState]] = []
         self.events: list[str] = []
 
-    def ensure_schema(self) -> None:
-        pass
+    def preflight_schema(self) -> None:
+        self.events.append("preflight")
 
     def run_locked(
         self,
@@ -238,6 +238,7 @@ def test_sync_plans_and_applies_inside_locked_transaction(monkeypatch: pytest.Mo
     service.sync()
 
     assert repository.events == [
+        "preflight",
         "lock",
         "read target",
         "read target",
@@ -247,6 +248,23 @@ def test_sync_plans_and_applies_inside_locked_transaction(monkeypatch: pytest.Mo
         "state",
         "commit",
     ]
+
+
+def test_schema_preflight_fails_before_locked_row_mutation() -> None:
+    class FailingPreflightRepository(FakeRepository):
+        def preflight_schema(self) -> None:
+            self.events.append("preflight")
+            raise RuntimeError("missing migration")
+
+    frame = _frame((0,))
+    repository = FailingPreflightRepository()
+    service, _ = _service(frame, repository)
+
+    with pytest.raises(RuntimeError, match="missing migration"):
+        service.sync()
+
+    assert repository.events == ["preflight"]
+    assert repository.applied == []
 
 
 def test_same_data_advances_checkpoint_without_gold_or_digest_row_mutations() -> None:

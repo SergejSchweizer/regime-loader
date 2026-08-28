@@ -23,6 +23,7 @@ from application.gold_sidecars import GoldSidecarBuilder
 from application.paths import LakePaths
 from application.planner import PlannerConfig
 from application.ports.market_data import MarketDataProvider
+from application.postgres_sync import GoldSchemaMigrator
 from application.postgres_sync_service import GoldPostgresDeltaSync
 from application.registry import SERIES_REGISTRY
 from ingestion.bronze_uow import FilesystemBronzeUnitOfWork
@@ -40,7 +41,12 @@ from ingestion.gold_sync_source import FilesystemGoldFrameSource
 from ingestion.httpx_adapter import HttpxTransport
 from ingestion.inventory_refresh import InventoryRefreshService
 from ingestion.operational_repository import read_inventory
-from ingestion.postgres_gold_repository import PostgresGoldSyncRepository, PostgresSyncConfig
+from ingestion.postgres_gold_repository import (
+    PostgresAdminConfig,
+    PostgresGoldSchemaMigrator,
+    PostgresGoldSyncRepository,
+    PostgresSyncConfig,
+)
 from ingestion.silver_repository import SilverSeriesRepository
 from ingestion.stoxx_provider import StoxxProvider
 from ingestion.yahoo_provider import YahooMoveProvider
@@ -52,6 +58,7 @@ EXIT_PIPELINE = 20
 _SOURCE_COMMANDS = frozenset({"bootstrap", "update", "reconcile", "run-daily"})
 _GOLD_COMMANDS = frozenset({"gold-build", "run-daily"})
 _POSTGRES_SYNC_COMMAND = "gold-sync-postgres"
+_POSTGRES_MIGRATE_COMMAND = "postgres-migrate"
 _UNUSED_GIT_IDENTITY = "0" * 40
 
 
@@ -95,6 +102,12 @@ class PostgresSyncRuntime:
     event_sink: JsonEventSink
 
 
+@dataclass(frozen=True, slots=True)
+class PostgresMigrationRuntime:
+    migrator: GoldSchemaMigrator
+    event_sink: JsonEventSink
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="regime-loader")
     parser.add_argument("--lake-root", type=Path, default=Path("lake"))
@@ -106,6 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
         child.add_argument("--series", action="append", default=[])
     subparsers.add_parser("gold-build")
     subparsers.add_parser(_POSTGRES_SYNC_COMMAND)
+    subparsers.add_parser(_POSTGRES_MIGRATE_COMMAND)
     inventory = subparsers.add_parser("inventory")
     inventory.add_argument("--json", action="store_true", dest="as_json")
     inventory.add_argument("--series", action="append", default=[])
@@ -147,10 +161,11 @@ def _logger(stderr: TextIO) -> logging.Logger:
     return logger
 
 
-def _runtime_secrets() -> tuple[str, ...]:
+def _configured_secrets() -> tuple[str, ...]:
     return (
         os.environ.get("FRED_API_KEY", ""),
         os.environ.get("PGPASSWORD", ""),
+        os.environ.get("MARKET_REGIME_POSTGRES_ADMIN_PASSWORD", ""),
     )
 
 
@@ -214,7 +229,7 @@ def build_runtime(
     mirror = RsyncGoldMirror(paths.root / "gold", Path(mirror_root)) if mirror_root else None
     publisher = GoldPublisher(catalog, bundle, views, mirror=mirror)
     retention = GoldRetentionService(catalog, GoldBundleSweeper(paths), views)
-    event_sink = JsonEventSink(_logger(stderr), secrets=_runtime_secrets())
+    event_sink = JsonEventSink(_logger(stderr), secrets=_configured_secrets())
     pipeline = DailyMedallionPipeline(
         series_registry=SERIES_REGISTRY,
         bronze=bronze,
@@ -243,6 +258,15 @@ def build_postgres_sync_runtime(*, lake_root: Path, stderr: TextIO) -> PostgresS
         clock=lambda: datetime.now(UTC),
     )
     return PostgresSyncRuntime(sync=sync, event_sink=event_sink)
+
+
+def build_postgres_migration_runtime(*, stderr: TextIO) -> PostgresMigrationRuntime:
+    config = PostgresAdminConfig.from_env()
+    migrator = PostgresGoldSchemaMigrator(config)
+    return PostgresMigrationRuntime(
+        migrator=migrator,
+        event_sink=JsonEventSink(_logger(stderr), secrets=(config.password,)),
+    )
 
 
 def _dispatch(
@@ -302,6 +326,14 @@ def _dispatch_postgres_sync(runtime: PostgresSyncRuntime) -> int:
     return EXIT_SUCCESS
 
 
+def _dispatch_postgres_migration(runtime: PostgresMigrationRuntime) -> int:
+    runtime.migrator.migrate()
+    runtime.event_sink(
+        {"command": _POSTGRES_MIGRATE_COMMAND, "stage": "postgres_migration", "status": "success"}
+    )
+    return EXIT_SUCCESS
+
+
 def _failure_event(
     stderr: TextIO,
     *,
@@ -322,7 +354,7 @@ def _failure_event(
     }
     if extra:
         event.update(extra)
-    JsonEventSink(_logger(stderr), secrets=_runtime_secrets())(event)
+    JsonEventSink(_logger(stderr), secrets=_configured_secrets())(event)
 
 
 def main(
@@ -345,8 +377,11 @@ def main(
     runtime: Runtime | None = None
     try:
         if command == _POSTGRES_SYNC_COMMAND:
-            postgres_runtime = build_postgres_sync_runtime(lake_root=args.lake_root, stderr=error)
-            return _dispatch_postgres_sync(postgres_runtime)
+            return _dispatch_postgres_sync(
+                build_postgres_sync_runtime(lake_root=args.lake_root, stderr=error)
+            )
+        if command == _POSTGRES_MIGRATE_COMMAND:
+            return _dispatch_postgres_migration(build_postgres_migration_runtime(stderr=error))
         runtime = build_runtime(
             lake_root=args.lake_root,
             command=command,

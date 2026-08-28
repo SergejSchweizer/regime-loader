@@ -131,7 +131,7 @@ def test_current_complete_compatible_catalog_record_is_required() -> None:
 
 def test_repository_protocol_can_be_implemented_without_psycopg() -> None:
     class FakeRepository:
-        def ensure_schema(self) -> None:
+        def preflight_schema(self) -> None:
             return None
 
         def run_locked(self, operation: Callable[[GoldSyncTransaction], object]) -> object:

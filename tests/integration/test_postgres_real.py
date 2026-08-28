@@ -23,6 +23,8 @@ from application.postgres_sync import (
     GoldSyncTransaction,
 )
 from ingestion.postgres_gold_repository import (
+    PostgresAdminConfig,
+    PostgresGoldSchemaMigrator,
     PostgresGoldSyncRepository,
     PostgresLockContentionError,
     PostgresSyncConfig,
@@ -64,6 +66,18 @@ def repository(postgres_dsn: str, monkeypatch: pytest.MonkeyPatch) -> PostgresGo
     )
 
 
+@pytest.fixture
+def migrator(postgres_dsn: str, monkeypatch: pytest.MonkeyPatch) -> PostgresGoldSchemaMigrator:
+    monkeypatch.setattr(postgres_module, "POSTGRES_HOST", "localhost")
+    monkeypatch.setattr(postgres_module, "POSTGRES_PORT", 5432)
+    return PostgresGoldSchemaMigrator(
+        PostgresAdminConfig(
+            "localhost", 5432, "regime_loader_admin", "regime_loader_test", "admin"
+        ),
+        connection_factory=lambda _config: psycopg.connect(postgres_dsn),
+    )
+
+
 def _timestamp(day: int) -> datetime:
     return datetime(2026, 8, day, 12, 34, 56, 123456, tzinfo=UTC)
 
@@ -84,10 +98,11 @@ def _state(timestamp: datetime) -> GoldSyncState:
 
 @pytest.mark.integration
 def test_real_postgres_migrations_are_idempotent_and_round_trip(
-    repository: PostgresGoldSyncRepository, postgres_dsn: str
+    repository: PostgresGoldSyncRepository, migrator: PostgresGoldSchemaMigrator, postgres_dsn: str
 ) -> None:
-    repository.ensure_schema()
-    repository.ensure_schema()
+    migrator.migrate()
+    migrator.migrate()
+    repository.preflight_schema()
     with psycopg.connect(postgres_dsn) as connection:
         columns = connection.execute(
             "SELECT column_name FROM information_schema.columns "
@@ -135,8 +150,9 @@ def test_real_postgres_migrations_are_idempotent_and_round_trip(
 @pytest.mark.integration
 def test_real_postgres_second_locked_transaction_reads_committed_state(
     repository: PostgresGoldSyncRepository,
+    migrator: PostgresGoldSchemaMigrator,
 ) -> None:
-    repository.ensure_schema()
+    migrator.migrate()
     timestamp = _timestamp(21)
     row = GoldRowPayload(timestamp, tuple(1.0 for _ in GOLD_COLUMNS[1:]))
     digest = GoldRowDigest(timestamp, "d" * 64)
@@ -192,7 +208,7 @@ def test_real_postgres_second_locked_transaction_reads_committed_state(
 
 @pytest.mark.integration
 def test_real_postgres_session_timeouts_bound_lock_and_statement(
-    postgres_dsn: str, monkeypatch: pytest.MonkeyPatch
+    postgres_dsn: str, monkeypatch: pytest.MonkeyPatch, migrator: PostgresGoldSchemaMigrator
 ) -> None:
     with psycopg.connect(postgres_dsn, autocommit=True) as connection:
         connection.execute("DROP SCHEMA IF EXISTS regime_loader_sync CASCADE")
@@ -218,7 +234,7 @@ def test_real_postgres_session_timeouts_bound_lock_and_statement(
             policy,
         )
     )
-    repository.ensure_schema()
+    migrator.migrate()
 
     session = repository._open()
     try:
@@ -271,14 +287,15 @@ def test_real_postgres_session_timeouts_bound_lock_and_statement(
 )
 def test_real_postgres_schema_drift_fails_closed_before_sync(
     repository: PostgresGoldSyncRepository,
+    migrator: PostgresGoldSchemaMigrator,
     postgres_dsn: str,
     drift_sql: str,
 ) -> None:
-    repository.ensure_schema()
+    migrator.migrate()
     with psycopg.connect(postgres_dsn, autocommit=True) as connection:
         connection.execute(drift_sql)
 
     with pytest.raises(
-        postgres_module.PostgresGoldRepositoryError, match="schema initialization failed"
+        postgres_module.PostgresGoldRepositoryError, match="schema preflight failed"
     ):
-        repository.ensure_schema()
+        repository.preflight_schema()
