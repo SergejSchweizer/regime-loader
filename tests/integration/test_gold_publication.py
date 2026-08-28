@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
 import pytest
 
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
-from application.gold_frame import GOLD_COLUMNS
+from application.gold_frame import GOLD_COLUMNS, GOLD_SOURCE_SERIES, SilverInputSignature
 from application.gold_publication import GoldPublisher
 from application.gold_sidecars import GoldSidecarBuilder
 from application.paths import LakePaths
@@ -45,6 +45,13 @@ def _frame(offset: float = 0.0) -> pl.DataFrame:
             "timestamp_m1": pl.Datetime("us", "UTC"),
             **{column: pl.Float64 for column in GOLD_COLUMNS[1:]},
         },
+    )
+
+
+def _inputs() -> tuple[SilverInputSignature, ...]:
+    return tuple(
+        SilverInputSignature(series_id, 2, date(2026, 8, 18), date(2026, 8, 19), f"{index:064x}")
+        for index, series_id in enumerate(GOLD_SOURCE_SERIES)
     )
 
 
@@ -91,7 +98,7 @@ def test_first_and_subsequent_publication_materialize_exact_catalog_current_and_
         tmp_path,
         build_times=[START, START + timedelta(seconds=1)],
     )
-    first = publisher.publish(_frame())
+    first = publisher.publish(_frame(), inputs=_inputs())
     assert first.build_id == "20260819T020000Z"
     records = catalog.read()
     assert len(records) == 1
@@ -104,7 +111,7 @@ def test_first_and_subsequent_publication_materialize_exact_catalog_current_and_
         paths.gold_profile().read_bytes() == paths.gold_build_profile(first.build_id).read_bytes()
     )
 
-    second = publisher.publish(_frame(offset=10.0))
+    second = publisher.publish(_frame(offset=10.0), inputs=_inputs())
     assert second.build_id == "20260819T020001Z"
     records = catalog.read()
     assert len(records) == 2
@@ -126,7 +133,7 @@ def test_physical_candidate_corruption_blocks_promotion_and_preserves_old_curren
         tmp_path,
         build_times=[START, START + timedelta(seconds=1)],
     )
-    first = first_publisher.publish(_frame())
+    first = first_publisher.publish(_frame(), inputs=_inputs())
 
     def corrupt(stage: str) -> None:
         if stage == "after_bundle_create":
@@ -141,7 +148,7 @@ def test_physical_candidate_corruption_blocks_promotion_and_preserves_old_curren
     )
     broken = GoldPublisher(catalog, broken_bundle, views, clock=lambda: START)
     with pytest.raises(ValueError, match="not a PNG|SHA-256 mismatch"):
-        broken.publish(_frame(offset=20.0))
+        broken.publish(_frame(offset=20.0), inputs=_inputs())
 
     records = catalog.read()
     assert [record.build_id for record in records if record.current] == [first.build_id]
@@ -162,10 +169,11 @@ def test_bundle_adapter_rejects_artifact_path_escape_before_publication(tmp_path
         artifact,
         started_at_utc=START,
         completed_at_utc=START + timedelta(minutes=1),
+        inputs=_inputs(),
     )
     escaped = replace(artifact, data_path=tmp_path / "outside.parquet")
     with pytest.raises(ValueError, match="physical artifact path mismatch"):
-        bundle._validate_candidate(escaped, sidecars)
+        bundle._validate_candidate(escaped, sidecars, _inputs())
     assert paths.gold_manifest_parquet().exists() is False
 
 
@@ -177,7 +185,7 @@ def test_postcommit_view_failure_preserves_new_catalog_and_next_reconcile_repair
         tmp_path,
         build_times=[START, START + timedelta(seconds=1)],
     )
-    first_publisher.publish(_frame())
+    first_publisher.publish(_frame(), inputs=_inputs())
     calls = 0
 
     def fail_third_json_refresh(stage: str) -> None:
@@ -196,7 +204,7 @@ def test_postcommit_view_failure_preserves_new_catalog_and_next_reconcile_repair
     )
     second_publisher = GoldPublisher(catalog, second_bundle, failing_views, clock=lambda: START)
     with pytest.raises(OSError, match="post-commit"):
-        second_publisher.publish(_frame(offset=30.0))
+        second_publisher.publish(_frame(offset=30.0), inputs=_inputs())
 
     records = catalog.read()
     assert [record.build_id for record in records if record.current] == ["20260819T020001Z"]
@@ -219,13 +227,14 @@ def test_stale_building_with_complete_files_is_failed_never_auto_promoted(tmp_pa
         tmp_path,
         build_times=[START],
     )
-    current = publisher.publish(_frame())
+    current = publisher.publish(_frame(), inputs=_inputs())
     stale_id = "20260819T020100Z"
     physical = build_store.create(_frame(offset=50.0), build_id=stale_id)
     sidecar_store.create(
         physical,
         started_at_utc=START,
         completed_at_utc=START + timedelta(minutes=1),
+        inputs=_inputs(),
     )
     catalog.append(
         GoldCatalogRecord(

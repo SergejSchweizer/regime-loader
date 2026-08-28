@@ -102,7 +102,8 @@ class FakePublisher:
         self.reconcile_count += 1
         return []
 
-    def publish(self, frame: pl.DataFrame) -> GoldCatalogRecord:
+    def publish(self, frame: pl.DataFrame, *, inputs: object = ()) -> GoldCatalogRecord:
+        del inputs
         self.publish_count += 1
         self.frames.append(frame)
         record = GoldCatalogRecord(

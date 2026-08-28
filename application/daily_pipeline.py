@@ -118,7 +118,7 @@ class DailyMedallionPipeline:
             self._publisher.reconcile()
             self._event(run_id, "gold-build", stage="recovery", status="success")
             gold = self._canonical_gold(run_id=run_id, command="gold-build")
-            published = self._publisher.publish(gold.frame)
+            published = self._publisher.publish(gold.frame, inputs=gold.inputs)
             self._event(
                 run_id,
                 "gold-build",
@@ -163,7 +163,7 @@ class DailyMedallionPipeline:
 
             self._build_selected_silver(selected, run_id=run_id, command="run-daily")
             gold = self._canonical_gold(run_id=run_id, command="run-daily")
-            published = self._publisher.publish(gold.frame)
+            published = self._publisher.publish(gold.frame, inputs=gold.inputs)
             self._event(
                 run_id,
                 "run-daily",

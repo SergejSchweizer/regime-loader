@@ -7,7 +7,12 @@ import polars as pl
 import pytest
 
 from application.gold_catalog import GoldBuildStatus, GoldCatalogRecord
-from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
+from application.gold_frame import (
+    GOLD_COLUMNS,
+    GOLD_FEATURE_VERSION,
+    GOLD_SCHEMA_VERSION,
+    SilverInputSignature,
+)
 from application.gold_publication import GoldPublicationBundle, GoldPublisher
 
 START = datetime(2026, 8, 19, 2, tzinfo=UTC)
@@ -102,10 +107,12 @@ class FakeBundle:
         *,
         build_id: str,
         started_at_utc: datetime,
+        inputs: tuple[SilverInputSignature, ...],
     ) -> GoldPublicationBundle:
         assert frame.columns == list(GOLD_COLUMNS)
         assert build_id == self.build_id
         assert started_at_utc.tzinfo is not None
+        assert isinstance(inputs, tuple)
         if self.fail:
             raise OSError("injected bundle failure")
         return GoldPublicationBundle(

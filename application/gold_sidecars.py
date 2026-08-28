@@ -11,13 +11,22 @@ from datetime import UTC, datetime
 
 import polars as pl
 
-from application.gold_frame import GOLD_COLUMNS, GOLD_FEATURE_VERSION, GOLD_SCHEMA_VERSION
+from application.gold_frame import (
+    GOLD_COLUMNS,
+    GOLD_FEATURE_VERSION,
+    GOLD_SCHEMA_VERSION,
+    GOLD_SOURCE_SERIES,
+    SilverInputSignature,
+)
 from application.macro_features import MACRO_POLICY, MacroFeaturePolicy, macro_delta_lags
 from application.volatility_features import VOLATILITY_POLICY, VolatilityFeaturePolicy
 
 _DATASET_ID = "regime_features_daily"
 _GIT_HASH_RE = re.compile(r"^[0-9a-f]{40,64}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _TEST_GIT_FALLBACK = "0" * 40
+CURRENT_MANIFEST_VERSION = 2
+LEGACY_MANIFEST_VERSION = 1
 
 
 def gold_formula_parameters(
@@ -89,6 +98,7 @@ class GoldBuildManifest:
     dataset_id: str
     build_id: str
     artifact_state: str
+    manifest_version: int
     schema_version: int
     feature_version: int
     started_at_utc: str
@@ -101,7 +111,12 @@ class GoldBuildManifest:
     data_sha256: str
     feature_set_hash: str
     git_commit_hash: str
+    inputs: tuple[SilverInputSignature, ...]
     plot_path: str
+
+    @property
+    def provenance_certified(self) -> bool:
+        return self.manifest_version == CURRENT_MANIFEST_VERSION and bool(self.inputs)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -115,6 +130,21 @@ class GoldBuildManifest:
             "feature_set_hash": self.feature_set_hash,
             "feature_version": self.feature_version,
             "git_commit_hash": self.git_commit_hash,
+            "inputs": [
+                {
+                    "max_observation_date": None
+                    if signature.max_observation_date is None
+                    else signature.max_observation_date.isoformat(),
+                    "min_observation_date": None
+                    if signature.min_observation_date is None
+                    else signature.min_observation_date.isoformat(),
+                    "row_count": signature.row_count,
+                    "series_id": signature.series_id,
+                    "sha256": signature.sha256,
+                }
+                for signature in self.inputs
+            ],
+            "manifest_version": self.manifest_version,
             "max_timestamp": self.max_timestamp,
             "min_timestamp": self.min_timestamp,
             "plot_path": self.plot_path,
@@ -171,6 +201,7 @@ class GoldSidecarBuilder:
         data_path: str,
         data_sha256: str,
         plot_path: str,
+        inputs: tuple[SilverInputSignature, ...] = (),
         schema_version: int = GOLD_SCHEMA_VERSION,
         feature_version: int = GOLD_FEATURE_VERSION,
     ) -> GoldBuildManifest:
@@ -187,10 +218,15 @@ class GoldSidecarBuilder:
             raise TypeError("Gold sidecar min timestamp must be datetime")
         if maximum is not None and not isinstance(maximum, datetime):
             raise TypeError("Gold sidecar max timestamp must be datetime")
+        manifest_version = LEGACY_MANIFEST_VERSION
+        if inputs:
+            _validate_inputs(inputs)
+            manifest_version = CURRENT_MANIFEST_VERSION
         return GoldBuildManifest(
             dataset_id=_DATASET_ID,
             build_id=build_id,
             artifact_state="built",
+            manifest_version=manifest_version,
             schema_version=schema_version,
             feature_version=feature_version,
             started_at_utc=started,
@@ -207,6 +243,7 @@ class GoldSidecarBuilder:
                 feature_version=feature_version,
             ),
             git_commit_hash=self._git_commit_hash,
+            inputs=inputs,
             plot_path=plot_path,
         )
 
@@ -214,3 +251,19 @@ class GoldSidecarBuilder:
 def expected_manifest_keys() -> Sequence[str]:
     """Stable key contract used by physical validation and offline tests."""
     return tuple(sorted(GoldBuildManifest.__dataclass_fields__))
+
+
+def _validate_inputs(inputs: tuple[SilverInputSignature, ...]) -> None:
+    if tuple(signature.series_id for signature in inputs) != GOLD_SOURCE_SERIES:
+        raise ValueError("Gold input provenance series order mismatch")
+    for signature in inputs:
+        if signature.row_count < 0:
+            raise ValueError("Gold input provenance row count cannot be negative")
+        if _SHA256_RE.fullmatch(signature.sha256) is None:
+            raise ValueError("Gold input provenance SHA-256 is invalid")
+        if (
+            signature.min_observation_date is not None
+            and signature.max_observation_date is not None
+            and signature.max_observation_date < signature.min_observation_date
+        ):
+            raise ValueError("Gold input provenance date bounds are invalid")
