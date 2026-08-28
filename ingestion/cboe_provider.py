@@ -12,7 +12,6 @@ from application.contracts import FetchCapability, NativeShape, Provider, Series
 from application.errors import ProviderHttpError
 from application.ports.http import HttpRequest, HttpTransport, RequestContext
 from application.ports.market_data import ProviderRequest
-from ingestion.ohlc_validation import validate_ohlc_bar
 
 Clock = Callable[[], datetime]
 _CBOE_SERIES = frozenset({"vix", "vix9d", "vix3m", "vix6m", "vix1y"})
@@ -106,11 +105,16 @@ class CboeProvider:
         )
         if frame.select(pl.any_horizontal(pl.all().is_null()).any()).item():
             raise ValueError("CBOE payload contains invalid or missing OHLC observations")
-        for column in ("open", "high", "low", "close"):
-            if not bool(frame.select(pl.col(column).is_finite().all()).item()):
-                raise ValueError(f"CBOE payload contains non-finite {column}")
-        for values in frame.select("open", "high", "low", "close").to_dicts():
-            validate_ohlc_bar(values, provider="CBOE")
+        valid_bar = (
+            pl.all_horizontal(pl.col("open", "high", "low", "close").is_finite())
+            & pl.all_horizontal(pl.col("open", "high", "low", "close") >= 0)
+            & (pl.col("high") >= pl.col("low"))
+            & (pl.col("high") >= pl.max_horizontal("open", "close"))
+            & (pl.col("low") <= pl.min_horizontal("open", "close"))
+        )
+        frame = frame.filter(valid_bar)
+        if frame.is_empty():
+            raise ValueError("CBOE payload contains no valid OHLC observations")
         if bool(frame.select(pl.col("observation_date").is_duplicated().any()).item()):
             raise ValueError("CBOE payload contains duplicate observation dates")
         fetched_at = _normalized_clock_value(self._clock)
