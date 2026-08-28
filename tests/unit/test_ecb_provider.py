@@ -67,6 +67,15 @@ def test_calendar_gaps_and_missing_values_remain_absent() -> None:
     assert date(2026, 8, 13) not in frame.get_column("observation_date").to_list()
 
 
+@pytest.mark.parametrize("value", ["bad", "nan", "inf"])
+def test_malformed_or_nonfinite_values_fail_closed(value: str) -> None:
+    content = f"TIME_PERIOD,OBS_VALUE\n2026-08-19,{value}\n".encode()
+    provider = EcbProvider(FakeTransport(HttpResponse(200, content, {})), clock=lambda: NOW)
+
+    with pytest.raises(ValueError, match="invalid observation value"):
+        provider.fetch(series_contract("ciss"), update_request())
+
+
 def test_empty_and_semantic_no_result_are_valid_noops() -> None:
     empty = EcbProvider(FakeTransport(HttpResponse(200, b"", {})), clock=lambda: NOW).fetch(
         series_contract("ciss"), update_request()

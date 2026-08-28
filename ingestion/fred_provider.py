@@ -116,10 +116,10 @@ class FredProvider:
                 continue
             try:
                 value = float(raw)
-            except (TypeError, ValueError):
-                continue
+            except (TypeError, ValueError) as exc:
+                raise ValueError("FRED payload contains invalid observation value") from exc
             if not math.isfinite(value):
-                continue
+                raise ValueError("FRED payload contains non-finite observation value")
             rows.append({"observation_date": observation_date, "value": value})
         if not rows:
             return self._empty_frame()
