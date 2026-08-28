@@ -77,6 +77,7 @@ def test_sql_is_idempotent_and_fails_on_incompatible_existing_state() -> None:
     assert "existing regime-loader role has incompatible privileges" in sql
     assert f'ALTER SCHEMA "regime_loader" OWNER TO "{POSTGRES_OWNER_ROLE}"' in sql
     assert f'ALTER DEFAULT PRIVILEGES FOR ROLE "{POSTGRES_OWNER_ROLE}"' in sql
+    assert "to_regclass('regime_loader_sync.schema_migrations') IS NOT NULL" in sql
 
 
 def test_admin_and_application_passwords_must_be_distinct() -> None:

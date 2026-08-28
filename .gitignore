@@ -14,3 +14,4 @@ htmlcov/
 lake/
 config.yaml
 artifacts/private/
+.locks/

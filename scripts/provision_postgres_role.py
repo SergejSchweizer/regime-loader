@@ -35,6 +35,15 @@ def _table_identifier(schema: str, table: str) -> str:
     return f"{_identifier(schema)}.{_identifier(table)}"
 
 
+def _conditional_table_grant(schema: str, table: str, role: str) -> str:
+    privileges = "SELECT" if table == "schema_migrations" else "SELECT, INSERT, UPDATE, DELETE"
+    return (
+        f"IF to_regclass({_literal(f'{schema}.{table}')}) IS NOT NULL THEN\n"
+        f"    GRANT {privileges} ON TABLE {_table_identifier(schema, table)} TO {role};\n"
+        "END IF;"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProvisioningConfig:
     host: str
@@ -92,13 +101,8 @@ def provision_sql(database: str, app_password: str, admin_user: str) -> str:
         f"ALTER TABLE IF EXISTS {_table_identifier(schema, table)} OWNER TO {owner_i};"
         for schema, table in POSTGRES_TABLES
     )
-    table_grants = (
-        "\n".join(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
-            f"{_table_identifier(schema, table)} TO {role_i};"
-            for schema, table in POSTGRES_TABLES[:-1]
-        )
-        + f"\nGRANT SELECT ON TABLE {_table_identifier(*POSTGRES_TABLES[-1])} TO {role_i};"
+    table_grants = "\n".join(
+        _conditional_table_grant(schema, table, role_i) for schema, table in POSTGRES_TABLES
     )
     default_privileges = "\n".join(
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_i} IN SCHEMA {_identifier(schema)} "
@@ -136,7 +140,11 @@ GRANT {owner_i} TO {admin_i};
 {table_ownership}
 REVOKE ALL ON ALL TABLES IN SCHEMA "regime_loader" FROM {role_i};
 REVOKE ALL ON ALL TABLES IN SCHEMA "regime_loader_sync" FROM {role_i};
+DO $grants$
+BEGIN
 {table_grants}
+END
+$grants$;
 {default_privileges}
 """
 
