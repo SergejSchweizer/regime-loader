@@ -263,7 +263,8 @@ Rules:
 
 - no synthetic observations;
 - duplicate incoming natural keys are rejected;
-- equal-key source revisions may replace retained rows once;
+- Bronze and Silver retain historical observation dates and the latest accepted value for each natural key; an equal-key source revision replaces that retained value rather than creating a provider-vintage history;
+- the lake is not a provider-vintage/time-travel archive unless a future explicit vintage journal is introduced;
 - upstream omission or a shorter response does not imply deletion;
 - only affected monthly partitions are rewritten;
 - logical no-op is a physical no-op.
