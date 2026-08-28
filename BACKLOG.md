@@ -2133,11 +2133,11 @@ Acceptance:
 ## PR-59: Remove Documentation Drift And Clarify Revision/Vintage Semantics
 
 PR name: `documentation-contract-accuracy`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: #65
 Git branch: `pr-59/documentation-contract-accuracy`
-Git status: `not-started (branch absent)`
+Git status: `pushed-ci-failing`
 Agent lane: Documentation/governance; one weak agent
 Depends on: PR-40
 Commit: `docs(pr-59): correct repository contract documentation`

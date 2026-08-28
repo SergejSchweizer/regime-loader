@@ -446,12 +446,11 @@ tests/integration/   offline component/E2E tests
 tests/fixtures/      committed small fixtures
 lake/                ignored runtime data
 AGENTS.md             coding-agent rules
-BACKLOG.md            core implementation backlog
-BACKLOG_POSTGRES.md   PostgreSQL serving extension backlog
+BACKLOG.md            implementation backlog, including PostgreSQL work
 ARCHITECTURE.md       durable engineering contract
 README.md             operator/consumer contract
 ```
 
 ## Documentation Contract
 
-`BACKLOG.md`, `BACKLOG_POSTGRES.md`, `ARCHITECTURE.md`, `README.md`, and `AGENTS.md` must not intentionally contradict one another. A PR that changes a documented contract updates the relevant sidecars in the same PR.
+`BACKLOG.md`, `ARCHITECTURE.md`, `README.md`, and `AGENTS.md` must not intentionally contradict one another. `BACKLOG.md` is the sole backlog authority. A PR that changes a documented contract updates the relevant sidecars in the same PR.
