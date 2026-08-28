@@ -14,6 +14,7 @@ from application.contracts import FetchCapability, NativeShape, Provider, Series
 from application.errors import ProviderHttpError
 from application.ports.http import HttpRequest, HttpTransport, RequestContext
 from application.ports.market_data import ProviderRequest
+from ingestion.ohlc_validation import validate_ohlc_bar
 
 Clock = Callable[[], datetime]
 _DEFAULT_BASE_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
@@ -139,6 +140,7 @@ class YahooMoveProvider:
                 if not math.isfinite(value):
                     raise ValueError(f"Yahoo payload contains non-finite {name}")
                 numeric[name] = value
+            validate_ohlc_bar(numeric, provider="Yahoo")
             rows.append(
                 {
                     "observation_date": datetime.fromtimestamp(int(timestamp), UTC).date(),
