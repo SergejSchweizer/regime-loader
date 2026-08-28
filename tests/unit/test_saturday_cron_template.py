@@ -182,6 +182,45 @@ def test_sunday_runner_rejects_lock_contention_before_any_cli_command(tmp_path: 
     assert not record_path.exists()
 
 
+def test_sunday_runner_blocks_maintenance_but_allows_non_destructive_verification(
+    tmp_path: Path,
+) -> None:
+    project_root, bin_dir = _runner_fixture(tmp_path)
+    marker = project_root / ".maintenance" / "regime-loader-reconstruction"
+    marker.parent.mkdir()
+    marker.touch()
+    record_path = tmp_path / "runner-record"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "RUNNER_RECORD": str(record_path),
+    }
+
+    blocked = subprocess.run(
+        [str(project_root / "ops" / "run-regime-loader-sunday.sh")],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    verified = subprocess.run(
+        [str(project_root / "ops" / "run-regime-loader-sunday.sh")],
+        cwd=tmp_path,
+        env={**environment, "REGIME_LOADER_SUNDAY_VERIFY_ONLY": "true"},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert blocked.returncode == 4
+    assert "disabled for production reconstruction" in (
+        project_root / ".logs" / "regime-loader.log"
+    ).read_text(encoding="utf-8")
+    assert verified.returncode == 0
+    assert not record_path.exists()
+
+
 def test_sunday_runner_releases_lock_after_daily_failure_and_skips_postgres_sync(
     tmp_path: Path,
 ) -> None:
