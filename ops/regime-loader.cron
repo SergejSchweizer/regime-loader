@@ -1,6 +1,8 @@
 # Install with: crontab ops/regime-loader.cron
-# The deployment host's local time zone determines when this runs.
+# Sunday 10:00 follows Europe/Vienna wall-clock time, including DST changes.
 # The runner owns configuration export, logging, daily execution, and PostgreSQL sync.
+
+CRON_TZ=Europe/Vienna
 
 # Sunday at 10:00: publish local Gold, then synchronize PostgreSQL on success.
 0 10 * * 0 /home/dev_market/regime-loader/ops/run-regime-loader-sunday.sh

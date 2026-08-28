@@ -348,6 +348,8 @@ This distinction is deliberate: the project guarantees **logical/persistence del
 
 `run-daily` and normal `update` must **never automatically choose `reconcile`** based on elapsed time, state age, or any hidden policy. If periodic reconciliation is desired, it is scheduled as a separate explicit command.
 
+The sole Sunday `run-daily -> gold-sync-postgres` chain is scheduled at `0 10 * * 0` using the explicit `Europe/Vienna` IANA timezone. It retains 10:00 local wall-clock execution across daylight-saving changes; reconciliation remains a separately scheduled explicit operator command.
+
 Reconciliation still obeys the rule that source omission is not deletion. Explicit deletion handling requires a separate source-mutation contract.
 
 State tracks at least last success, last observation cache, requested bounds, operation mode, fetched/accepted/changed row counts, and optional last successful explicit reconciliation time.

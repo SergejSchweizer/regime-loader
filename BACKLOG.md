@@ -1832,11 +1832,11 @@ Acceptance:
 ## PR-46: Freeze An Explicit Europe/Vienna Scheduler Timezone
 
 PR name: `scheduler-timezone-contract`
-Status: Planned
-Updated: 2026-08-24
-PR: TBD
+Status: In Progress
+Updated: 2026-08-28
+PR: none
 Git branch: `pr-46/scheduler-timezone-contract`
-Git status: `not-started (branch absent)`
+Git status: `active-clean`
 Agent lane: Scheduler semantics; one weak agent
 Depends on: PR-45
 Commit: `fix(pr-46): freeze scheduler timezone contract`
