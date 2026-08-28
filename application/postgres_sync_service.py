@@ -43,6 +43,8 @@ class GoldCatalogReader(Protocol):
 class GoldFrameSource(Protocol):
     """Read/hash exactly the catalog-selected immutable Gold data path."""
 
+    def validate_bundle(self, record: GoldCatalogRecord) -> None: ...
+
     def sha256_path(self, relative_data_path: str) -> str: ...
 
     def read_path(self, relative_data_path: str) -> pl.DataFrame: ...
@@ -58,8 +60,9 @@ class GoldPostgresDeltaSync:
     clock: Clock
 
     def sync(self) -> GoldSyncResult:
-        self.repository.ensure_schema()
         record = select_current_sync_record(self.catalog.read())
+        self._validate_bundle(record)
+        self.repository.ensure_schema()
         data_path = self._required_data_path(record)
         data_sha256 = self.source.sha256_path(data_path)
         self._validate_sha256(data_sha256)
@@ -114,6 +117,12 @@ class GoldPostgresDeltaSync:
             deleted=plan.deleted,
             unchanged=plan.unchanged_count,
         )
+
+    def _validate_bundle(self, record: GoldCatalogRecord) -> None:
+        try:
+            self.source.validate_bundle(record)
+        except (OSError, TypeError, ValueError) as exc:
+            raise GoldSyncSourceError("current Gold bundle integrity verification failed") from exc
 
     def _desired_state(self, record: GoldCatalogRecord, data_sha256: str) -> GoldSyncState:
         row_count = record.row_count

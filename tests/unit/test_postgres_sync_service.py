@@ -110,6 +110,10 @@ class FakeSource:
         self.sha256 = sha256
         self.hash_paths: list[str] = []
         self.read_paths: list[str] = []
+        self.validated_records: list[GoldCatalogRecord] = []
+
+    def validate_bundle(self, record: GoldCatalogRecord) -> None:
+        self.validated_records.append(record)
 
     def sha256_path(self, relative_data_path: str) -> str:
         self.hash_paths.append(relative_data_path)
@@ -210,6 +214,7 @@ def test_first_sync_inserts_complete_current_gold() -> None:
     plan, state = repository.applied[0]
     assert [row.timestamp_m1 for row in plan.inserts] == [_ts(0), _ts(1), _ts(2)]
     assert state.source_build_id == "20260822T100000Z"
+    assert source.validated_records == [_record(frame)]
     assert source.hash_paths == [_PATH]
     assert source.read_paths == [_PATH]
 
