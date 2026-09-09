@@ -75,8 +75,8 @@ def test_outer_union_exact_order_versions_and_provenance() -> None:
     assert build.frame.get_column("timestamp_m1").to_list() == [t1, t2, t3]
     assert build.frame.filter(pl.col("timestamp_m1") == t1).item(0, "ciss_level") is None
     assert build.frame.filter(pl.col("timestamp_m1") == t3).item(0, "vix_level") is None
-    assert build.schema_version == GOLD_SCHEMA_VERSION == 3
-    assert build.feature_version == GOLD_FEATURE_VERSION == 2
+    assert build.schema_version == GOLD_SCHEMA_VERSION == 4
+    assert build.feature_version == GOLD_FEATURE_VERSION == 3
     assert [item.series_id for item in build.inputs] == list(GOLD_SOURCE_SERIES)
     assert all(len(item.sha256) == 64 for item in build.inputs)
     assert "observation_date" not in build.frame.columns

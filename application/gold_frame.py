@@ -12,11 +12,12 @@ import polars as pl
 from application.macro_features import MACRO_SERIES
 from application.momentum_features import momentum_feature_columns
 from application.registry import SERIES_REGISTRY
+from application.return_features import return_feature_columns
 from application.silver import SILVER_SCHEMA
 from application.volatility_features import VOLATILITY_SERIES
 
-GOLD_SCHEMA_VERSION = 3
-GOLD_FEATURE_VERSION = 2
+GOLD_SCHEMA_VERSION = 4
+GOLD_FEATURE_VERSION = 3
 GOLD_SOURCE_SERIES = tuple(SERIES_REGISTRY)
 
 _VOLATILITY_BASE_COLUMNS = tuple(
@@ -36,7 +37,11 @@ _VOLATILITY_BASE_COLUMNS = tuple(
     "vix6m_minus_vix",
     "vix1y_minus_vix",
 )
-VOLATILITY_FEATURE_COLUMNS = _VOLATILITY_BASE_COLUMNS + momentum_feature_columns(VOLATILITY_SERIES)
+VOLATILITY_FEATURE_COLUMNS = (
+    _VOLATILITY_BASE_COLUMNS
+    + momentum_feature_columns(VOLATILITY_SERIES)
+    + return_feature_columns(VOLATILITY_SERIES)
+)
 
 _MACRO_BASE_COLUMNS = (
     "ciss_level",
@@ -61,12 +66,17 @@ _MACRO_BASE_COLUMNS = (
     "usd_broad_delta_20obs",
     "us_10y_minus_us_2y",
 )
-MACRO_FEATURE_COLUMNS = _MACRO_BASE_COLUMNS + momentum_feature_columns(MACRO_SERIES)
+MACRO_FEATURE_COLUMNS = (
+    _MACRO_BASE_COLUMNS
+    + momentum_feature_columns(MACRO_SERIES)
+    + return_feature_columns(MACRO_SERIES)
+)
 GOLD_COLUMNS = (
     "timestamp_m1",
     *_VOLATILITY_BASE_COLUMNS,
     *_MACRO_BASE_COLUMNS,
     *momentum_feature_columns((*VOLATILITY_SERIES, *MACRO_SERIES)),
+    *return_feature_columns((*VOLATILITY_SERIES, *MACRO_SERIES)),
 )
 
 
@@ -79,9 +89,9 @@ class GoldSemanticVersions:
 
     def __post_init__(self) -> None:
         if self.schema_version != GOLD_SCHEMA_VERSION:
-            raise ValueError("schema_version is source-controlled and fixed at 3")
+            raise ValueError("schema_version is source-controlled and fixed at 4")
         if self.feature_version != GOLD_FEATURE_VERSION:
-            raise ValueError("feature_version is source-controlled and fixed at 2")
+            raise ValueError("feature_version is source-controlled and fixed at 3")
 
 
 GOLD_VERSIONS = GoldSemanticVersions()

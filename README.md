@@ -178,6 +178,7 @@ Feature semantics are fixed and causal:
 - 60-observation z-scores use the last 60 valid observations including `t` and population standard deviation (`ddof=0`);
 - each of the 13 source series includes positive momentum autocorrelation at `(lag, window)` pairs `(1, 60)`, `(5, 60)`, and `(20, 120)`;
 - momentum autocorrelation is computed on one-observation source-unit changes, clips negative correlations to zero, and remains null until its full causal window is available;
+- each source level also includes rolling geometric-mean simple returns over 10, 25, 60, 120, and 240 observations, expressed as percentages;
 - no forward fill, backward fill, interpolation, centered windows, or implicit as-of carry;
 - same-series rolling operations count valid observations, not calendar days;
 - cross-series ratios/spreads require the same `timestamp_m1`;
@@ -186,8 +187,8 @@ Feature semantics are fixed and causal:
 Initial semantic versions:
 
 ```text
-schema_version  = 3
-feature_version = 2
+schema_version  = 4
+feature_version = 3
 ```
 
 Schema version changes for column name/order/type changes. Feature version changes for formula/parameter changes that preserve schema.
