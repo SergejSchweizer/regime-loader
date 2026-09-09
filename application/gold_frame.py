@@ -9,15 +9,17 @@ from datetime import date
 
 import polars as pl
 
+from application.macro_features import MACRO_SERIES
+from application.momentum_features import momentum_feature_columns
 from application.registry import SERIES_REGISTRY
 from application.silver import SILVER_SCHEMA
 from application.volatility_features import VOLATILITY_SERIES
 
-GOLD_SCHEMA_VERSION = 2
-GOLD_FEATURE_VERSION = 1
+GOLD_SCHEMA_VERSION = 3
+GOLD_FEATURE_VERSION = 2
 GOLD_SOURCE_SERIES = tuple(SERIES_REGISTRY)
 
-VOLATILITY_FEATURE_COLUMNS = tuple(
+_VOLATILITY_BASE_COLUMNS = tuple(
     column
     for series_id in VOLATILITY_SERIES
     for column in (
@@ -34,8 +36,9 @@ VOLATILITY_FEATURE_COLUMNS = tuple(
     "vix6m_minus_vix",
     "vix1y_minus_vix",
 )
+VOLATILITY_FEATURE_COLUMNS = _VOLATILITY_BASE_COLUMNS + momentum_feature_columns(VOLATILITY_SERIES)
 
-MACRO_FEATURE_COLUMNS = (
+_MACRO_BASE_COLUMNS = (
     "ciss_level",
     "ciss_delta_1obs",
     "ciss_delta_5obs",
@@ -58,7 +61,13 @@ MACRO_FEATURE_COLUMNS = (
     "usd_broad_delta_20obs",
     "us_10y_minus_us_2y",
 )
-GOLD_COLUMNS = ("timestamp_m1", *VOLATILITY_FEATURE_COLUMNS, *MACRO_FEATURE_COLUMNS)
+MACRO_FEATURE_COLUMNS = _MACRO_BASE_COLUMNS + momentum_feature_columns(MACRO_SERIES)
+GOLD_COLUMNS = (
+    "timestamp_m1",
+    *_VOLATILITY_BASE_COLUMNS,
+    *_MACRO_BASE_COLUMNS,
+    *momentum_feature_columns((*VOLATILITY_SERIES, *MACRO_SERIES)),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,9 +79,9 @@ class GoldSemanticVersions:
 
     def __post_init__(self) -> None:
         if self.schema_version != GOLD_SCHEMA_VERSION:
-            raise ValueError("schema_version is source-controlled and fixed at 1")
+            raise ValueError("schema_version is source-controlled and fixed at 3")
         if self.feature_version != GOLD_FEATURE_VERSION:
-            raise ValueError("feature_version is source-controlled and fixed at 1")
+            raise ValueError("feature_version is source-controlled and fixed at 2")
 
 
 GOLD_VERSIONS = GoldSemanticVersions()

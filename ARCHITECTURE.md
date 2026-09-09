@@ -428,6 +428,16 @@ deltas remain series-specific as declared by the feature family.
 
 A 60-observation z-score uses the last 60 valid observations including `t` and population standard deviation (`ddof=0`). It is null before 60 observations or when standard deviation is zero.
 
+For every canonical source series, positive momentum autocorrelation uses the one-observation source-unit change:
+
+```text
+change_1obs(t) = x(t) - x(previous valid observation)
+rho_h,W(t) = Corr(change_1obs(t-W+1:t), change_1obs(t-h-W+1:t-h))
+momentum_autocorr_h_W(t) = max(rho_h,W(t), 0)
+```
+
+The fixed causal pairs are `(h, W) = (1, 60), (5, 60), (20, 120)`. Undefined values remain null; negative correlations are zero. The feature is a persistence signal, not a cumulative return.
+
 Cross-series ratios/spreads require same `timestamp_m1` values.
 
 Forbidden:
@@ -446,8 +456,8 @@ Before final Gold validation, feature NaN is normalized to null. Infinity is rej
 Initial constants:
 
 ```text
-schema_version  = 2
-feature_version = 1
+schema_version  = 3
+feature_version = 2
 ```
 
 `schema_version` changes for column name/order/type changes. `feature_version` changes when formulas/parameters change without a schema change. Runtime never auto-increments either.
