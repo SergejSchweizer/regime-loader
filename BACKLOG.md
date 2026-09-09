@@ -211,11 +211,13 @@ delta_Nobs(t) = x(t) - x(previous Nth valid observation)
 
 `zscore_60obs` uses last 60 valid observations including current and `ddof=0`; null before 60 observations or at zero variance. Cross-series features require same timestamp. No forward/back fill, interpolation, centered window, future data, or implicit as-of carry. Final Gold normalizes NaN to null and rejects infinity.
 
+Each canonical source series also exposes positive momentum autocorrelation at `(lag, window)` pairs `(1, 60)`, `(5, 60)`, and `(20, 120)`, calculated from causal one-observation source-unit changes. Negative correlations are clipped to zero and unavailable warm-up windows remain null.
+
 ### Gold semantic versions
 
 ```text
-schema_version  = 2
-feature_version = 1
+schema_version  = 3
+feature_version = 2
 ```
 
 Schema version changes for column name/order/type changes; feature version changes for formula/parameter semantics without schema change. Runtime never auto-increments.

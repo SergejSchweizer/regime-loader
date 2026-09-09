@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
+from application.momentum_features import add_positive_momentum_features, momentum_feature_columns
 from application.silver import SILVER_SCHEMA
 
 VOLATILITY_SERIES = ("vix", "vix9d", "vix3m", "vix6m", "vix1y", "vstoxx", "move")
@@ -69,7 +70,7 @@ def _series_features(
         (pl.col(level) - pl.col(level).shift(lag)).alias(f"{series_id}_delta_{lag}obs")
         for lag in policy.delta_lags
     ]
-    return (
+    result = (
         frame.with_columns(
             *delta_expressions,
             pl.col(level)
@@ -90,6 +91,11 @@ def _series_features(
             .alias(f"{series_id}_zscore_60obs")
         )
         .drop(mean, std)
+    )
+    return add_positive_momentum_features(
+        result,
+        series_id=series_id,
+        level_column=level,
     )
 
 
@@ -133,6 +139,27 @@ def build_volatility_features(
         (pl.col("vix6m_level") - pl.col("vix_level")).alias("vix6m_minus_vix"),
         (pl.col("vix1y_level") - pl.col("vix_level")).alias("vix1y_minus_vix"),
     )
+    ordered_columns = [
+        "timestamp_m1",
+        *(
+            column
+            for series_id in VOLATILITY_SERIES
+            for column in (
+                f"{series_id}_level",
+                f"{series_id}_delta_1obs",
+                f"{series_id}_delta_5obs",
+                f"{series_id}_delta_20obs",
+                f"{series_id}_zscore_60obs",
+            )
+        ),
+        "vix9d_vix_ratio",
+        "vix_vix3m_ratio",
+        "vix3m_minus_vix",
+        "vix6m_minus_vix",
+        "vix1y_minus_vix",
+        *momentum_feature_columns(VOLATILITY_SERIES),
+    ]
+    joined = joined.select(ordered_columns)
     numeric = [column for column in joined.columns if column != "timestamp_m1"]
     joined = joined.with_columns([pl.col(column).fill_nan(None) for column in numeric])
     for column in numeric:

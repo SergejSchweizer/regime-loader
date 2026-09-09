@@ -176,6 +176,8 @@ Feature semantics are fixed and causal:
 - `delta_Nobs(t) = x(t) - x(previous Nth valid observation)`;
 - every source level includes a causal `delta_1obs`; existing 5- and 20-observation deltas remain available according to the feature family;
 - 60-observation z-scores use the last 60 valid observations including `t` and population standard deviation (`ddof=0`);
+- each of the 13 source series includes positive momentum autocorrelation at `(lag, window)` pairs `(1, 60)`, `(5, 60)`, and `(20, 120)`;
+- momentum autocorrelation is computed on one-observation source-unit changes, clips negative correlations to zero, and remains null until its full causal window is available;
 - no forward fill, backward fill, interpolation, centered windows, or implicit as-of carry;
 - same-series rolling operations count valid observations, not calendar days;
 - cross-series ratios/spreads require the same `timestamp_m1`;
@@ -184,8 +186,8 @@ Feature semantics are fixed and causal:
 Initial semantic versions:
 
 ```text
-schema_version  = 2
-feature_version = 1
+schema_version  = 3
+feature_version = 2
 ```
 
 Schema version changes for column name/order/type changes. Feature version changes for formula/parameter changes that preserve schema.
