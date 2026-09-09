@@ -19,6 +19,7 @@ from application.gold_frame import (
     SilverInputSignature,
 )
 from application.macro_features import MACRO_POLICY, MacroFeaturePolicy, macro_delta_lags
+from application.momentum_features import MOMENTUM_POLICY, MomentumFeaturePolicy
 from application.volatility_features import VOLATILITY_POLICY, VolatilityFeaturePolicy
 
 _DATASET_ID = "regime_features_daily"
@@ -32,6 +33,7 @@ LEGACY_MANIFEST_VERSION = 1
 def gold_formula_parameters(
     volatility_policy: VolatilityFeaturePolicy = VOLATILITY_POLICY,
     macro_policy: MacroFeaturePolicy = MACRO_POLICY,
+    momentum_policy: MomentumFeaturePolicy = MOMENTUM_POLICY,
 ) -> dict[str, object]:
     """Return every policy and expression semantic that defines Gold feature values."""
     return {
@@ -55,6 +57,12 @@ def gold_formula_parameters(
             "us_10y_minus_us_2y",
         ],
         "ratio_missing_value_rule": "null unless numerator and positive denominator exist",
+        "momentum_autocorrelation": {
+            "lags_and_windows": [list(item) for item in momentum_policy.lag_windows],
+            "input": "one-observation source-unit changes",
+            "negative_values": "clipped to zero",
+            "ddof": momentum_policy.ddof,
+        },
     }
 
 

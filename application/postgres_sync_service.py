@@ -94,7 +94,8 @@ class GoldPostgresDeltaSync:
             raise GoldSyncVerificationError(
                 "PostgreSQL Gold digest count does not match authoritative sync state"
             )
-        self._require_matching_digests(target_digests, consumer_digests, "consumer rows")
+        if not self._is_schema_upgrade(prior_state, desired_state):
+            self._require_matching_digests(target_digests, consumer_digests, "consumer rows")
 
         frame = self.source.read_path(data_path)
         self._validate_frame_metadata(frame, record)
@@ -171,6 +172,13 @@ class GoldPostgresDeltaSync:
         ):
             return
         if (
+            prior.schema_version == 2
+            and desired.schema_version == 3
+            and prior.feature_version == 1
+            and desired.feature_version == 2
+        ):
+            return
+        if (
             prior.schema_version != desired.schema_version
             or prior.feature_version != desired.feature_version
         ):
@@ -187,6 +195,16 @@ class GoldPostgresDeltaSync:
             and prior.row_count == desired.row_count
             and prior.min_timestamp == desired.min_timestamp
             and prior.max_timestamp == desired.max_timestamp
+        )
+
+    @staticmethod
+    def _is_schema_upgrade(prior: GoldSyncState | None, desired: GoldSyncState) -> bool:
+        return (
+            prior is not None
+            and prior.schema_version == 2
+            and prior.feature_version == 1
+            and desired.schema_version == 3
+            and desired.feature_version == 2
         )
 
     @staticmethod

@@ -241,6 +241,11 @@ _MIGRATION_LEDGER_DDL = f"""CREATE TABLE IF NOT EXISTS {_MIGRATION_LEDGER} (
     version INTEGER PRIMARY KEY,
     applied_at_utc TIMESTAMPTZ(6) NOT NULL
 )"""
+_MOMENTUM_COLUMNS = tuple(column for column in GOLD_COLUMNS if "_momentum_autocorr_" in column)
+_MOMENTUM_COLUMN_MIGRATION = f"ALTER TABLE {_CONSUMER} " + ", ".join(
+    f"ADD COLUMN IF NOT EXISTS {_quote(column)} DOUBLE PRECISION NULL"
+    for column in _MOMENTUM_COLUMNS
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,7 +314,12 @@ _SCHEMA_SPECIFICATION = (
         ("version",),
     ),
 )
-_MIGRATIONS = ((_CONSUMER_DDL,), (_SYNC_STATE_DDL,), (_ROW_HASH_DDL,))
+_MIGRATIONS = (
+    (_CONSUMER_DDL,),
+    (_SYNC_STATE_DDL,),
+    (_ROW_HASH_DDL,),
+    (_MOMENTUM_COLUMN_MIGRATION,),
+)
 _OWNED_TABLES_SQL = """SELECT table_schema, table_name
 FROM information_schema.tables
 WHERE table_schema IN (%s, %s) AND table_type = 'BASE TABLE'
