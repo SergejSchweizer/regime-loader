@@ -213,11 +213,13 @@ delta_Nobs(t) = x(t) - x(previous Nth valid observation)
 
 Each canonical source series also exposes positive momentum autocorrelation at `(lag, window)` pairs `(1, 60)`, `(5, 60)`, and `(20, 120)`, calculated from causal one-observation source-unit changes. Negative correlations are clipped to zero and unavailable warm-up windows remain null.
 
+Each canonical source series also exposes rolling geometric-mean simple returns over 10, 25, 60, 120, and 240 observations, expressed as percentages and left null for invalid/non-positive level transitions or incomplete windows.
+
 ### Gold semantic versions
 
 ```text
-schema_version  = 3
-feature_version = 2
+schema_version  = 4
+feature_version = 3
 ```
 
 Schema version changes for column name/order/type changes; feature version changes for formula/parameter semantics without schema change. Runtime never auto-increments.

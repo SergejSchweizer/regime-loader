@@ -20,6 +20,7 @@ from application.gold_frame import (
 )
 from application.macro_features import MACRO_POLICY, MacroFeaturePolicy, macro_delta_lags
 from application.momentum_features import MOMENTUM_POLICY, MomentumFeaturePolicy
+from application.return_features import RETURN_WINDOWS
 from application.volatility_features import VOLATILITY_POLICY, VolatilityFeaturePolicy
 
 _DATASET_ID = "regime_features_daily"
@@ -62,6 +63,12 @@ def gold_formula_parameters(
             "input": "one-observation source-unit changes",
             "negative_values": "clipped to zero",
             "ddof": momentum_policy.ddof,
+        },
+        "rolling_geometric_returns": {
+            "windows_observations": list(RETURN_WINDOWS),
+            "input": "one-observation simple returns derived from strictly positive levels",
+            "output": "geometric mean return in percent",
+            "invalid_transition": "null",
         },
     }
 

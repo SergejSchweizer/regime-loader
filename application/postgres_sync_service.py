@@ -179,6 +179,13 @@ class GoldPostgresDeltaSync:
         ):
             return
         if (
+            prior.schema_version == 3
+            and desired.schema_version == 4
+            and prior.feature_version == 2
+            and desired.feature_version == 3
+        ):
+            return
+        if (
             prior.schema_version != desired.schema_version
             or prior.feature_version != desired.feature_version
         ):
@@ -199,12 +206,19 @@ class GoldPostgresDeltaSync:
 
     @staticmethod
     def _is_schema_upgrade(prior: GoldSyncState | None, desired: GoldSyncState) -> bool:
-        return (
-            prior is not None
-            and prior.schema_version == 2
-            and prior.feature_version == 1
-            and desired.schema_version == 3
-            and desired.feature_version == 2
+        return prior is not None and (
+            (
+                prior.schema_version == 2
+                and prior.feature_version == 1
+                and desired.schema_version == 3
+                and desired.feature_version == 2
+            )
+            or (
+                prior.schema_version == 3
+                and prior.feature_version == 2
+                and desired.schema_version == 4
+                and desired.feature_version == 3
+            )
         )
 
     @staticmethod

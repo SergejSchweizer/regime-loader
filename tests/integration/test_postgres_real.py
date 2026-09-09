@@ -94,8 +94,8 @@ def _state(timestamp: datetime) -> GoldSyncState:
         dataset_id=POSTGRES_DATASET_ID,
         source_build_id="20260828T000000Z",
         data_sha256="a" * 64,
-        schema_version=3,
-        feature_version=2,
+        schema_version=4,
+        feature_version=3,
         row_count=1,
         min_timestamp=timestamp,
         max_timestamp=timestamp,
@@ -118,8 +118,8 @@ def _record(timestamp: datetime) -> GoldCatalogRecord:
         current=True,
         started_at_utc=_timestamp(1),
         completed_at_utc=_timestamp(2),
-        schema_version=3,
-        feature_version=2,
+        schema_version=4,
+        feature_version=3,
         min_timestamp=timestamp,
         max_timestamp=timestamp,
         row_count=1,
@@ -259,7 +259,7 @@ def test_real_postgres_migrations_are_idempotent_and_round_trip(
             "SELECT version FROM regime_loader_sync.schema_migrations ORDER BY version"
         ).fetchall()
     assert {column[0] for column in columns} == set(GOLD_COLUMNS)
-    assert migrations == [(1,), (2,), (3,), (4,)]
+    assert migrations == [(1,), (2,), (3,), (4,), (5,)]
 
     timestamp = _timestamp(20)
     row = GoldRowPayload(timestamp, tuple(1.0 for _ in GOLD_COLUMNS[1:]))

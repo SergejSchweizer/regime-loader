@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import polars as pl
 
 from application.momentum_features import add_positive_momentum_features, momentum_feature_columns
+from application.return_features import add_geometric_return_features, return_feature_columns
 from application.silver import SILVER_SCHEMA
 
 VOLATILITY_SERIES = ("vix", "vix9d", "vix3m", "vix6m", "vix1y", "vstoxx", "move")
@@ -92,11 +93,12 @@ def _series_features(
         )
         .drop(mean, std)
     )
-    return add_positive_momentum_features(
+    result = add_positive_momentum_features(
         result,
         series_id=series_id,
         level_column=level,
     )
+    return add_geometric_return_features(result, series_id=series_id, level_column=level)
 
 
 def _outer_join(frames: list[pl.DataFrame]) -> pl.DataFrame:
@@ -158,6 +160,7 @@ def build_volatility_features(
         "vix6m_minus_vix",
         "vix1y_minus_vix",
         *momentum_feature_columns(VOLATILITY_SERIES),
+        *return_feature_columns(VOLATILITY_SERIES),
     ]
     joined = joined.select(ordered_columns)
     numeric = [column for column in joined.columns if column != "timestamp_m1"]
